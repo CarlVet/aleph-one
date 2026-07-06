@@ -1,0 +1,57 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "Aleph∞One"
+abstract: "A One Health-driven relational web application for integrated epidemiological data management across human, animal and environmental domains."
+type: software
+authors:
+  - family-names: Cossu
+    given-names: "Carlo Andrea"
+    orcid: "https://orcid.org/0000-0002-3334-8498"
+  - family-names: Trapani
+    given-names: Mattia
+    orcid: "https://orcid.org/0009-0001-0917-5945"
+  - family-names: Crafford
+    given-names: "Jan E."
+    orcid: "https://orcid.org/0000-0001-7343-8327"
+  - family-names: "van Schalkwyk"
+    given-names: "Louis O."
+    orcid: "https://orcid.org/0000-0003-4365-4904"
+  - family-names: Bastos
+    given-names: Armanda
+    orcid: "https://orcid.org/0000-0002-9223-4204"
+  - family-names: Oosthuizen
+    given-names: Marinda
+    orcid: "https://orcid.org/0000-0002-1893-0818"
+  - family-names: Quan
+    given-names: Melvyn
+    orcid: "https://orcid.org/0000-0003-3352-8488"
+  - family-names: Bhoora
+    given-names: "Raksha V."
+    orcid: "https://orcid.org/0000-0003-2377-2735"
+  - family-names: Garofolo
+    given-names: Giuliano
+    orcid: "https://orcid.org/0000-0001-7017-3888"
+  - family-names: "De Klerk"
+    given-names: "Lin-Mari"
+    orcid: "https://orcid.org/0000-0001-7348-3910"
+  - family-names: Minnie
+    given-names: Liaan
+    orcid: "https://orcid.org/0000-0002-9922-4295"
+  - family-names: Biondetti
+    given-names: "Giorgio P."
+    orcid: "https://orcid.org/0000-0002-4640-2422"
+  - family-names: "van Heerden"
+    given-names: Henriette
+    orcid: "https://orcid.org/0000-0002-3577-1273"
+license: AGPL-3.0-only
+repository-code: "https://github.com/CarlVet/aleph-one"
+url: "https://aleph-one.com"
+keywords:
+  - One Health
+  - epidemiology
+  - infectious disease
+  - surveillance
+  - data management
+  - LIMS
+  - Laravel
+# version and doi are filled in per release (Zenodo mints the DOI on each GitHub release).

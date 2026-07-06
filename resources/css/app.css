@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+    .index-table-container {
+        @apply overflow-x-auto;
+    }
+
+    .index-data-table {
+        @apply min-w-full divide-y divide-gray-200 text-xs;
+    }
+
+    .index-data-table thead th {
+        @apply !px-2 !py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500;
+    }
+
+    .index-data-table tbody td {
+        @apply !px-2 !py-1.5 whitespace-nowrap text-xs text-gray-700;
+    }
+
+    .index-data-table tbody tr {
+        @apply transition-colors duration-150;
+    }
+
+    .index-data-table tbody tr:hover {
+        @apply bg-gray-50;
+    }
+
+    .index-data-table input[type='text'],
+    .index-data-table input[type='date'],
+    .index-data-table input[type='number'],
+    .index-data-table input[type='search'],
+    .index-data-table select {
+        @apply w-full rounded border border-gray-200 px-1.5 py-1 text-[11px] shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500;
+    }
+}
