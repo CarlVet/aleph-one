@@ -3,8 +3,7 @@
 **A One Health-driven relational web application for integrated epidemiological data management.**
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-<!-- After the first Zenodo release, replace with the concept DOI badge:
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX) -->
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21227804.svg)](https://doi.org/10.5281/zenodo.21227804)
 
 Aleph∞One unifies the essential components of infectious-disease research into a single
 relational platform, preserving contextual relationships and end-to-end traceability from

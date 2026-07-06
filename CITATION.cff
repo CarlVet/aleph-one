@@ -46,6 +46,15 @@ authors:
 license: AGPL-3.0-only
 repository-code: "https://github.com/CarlVet/aleph-one"
 url: "https://aleph-one.com"
+version: 1.0.0
+date-released: "2026-07-06"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.21227804"
+    description: "Concept DOI — always resolves to the latest version."
+  - type: doi
+    value: "10.5281/zenodo.21227805"
+    description: "Version DOI for v1.0.0."
 keywords:
   - One Health
   - epidemiology
@@ -54,4 +63,4 @@ keywords:
   - data management
   - LIMS
   - Laravel
-# version and doi are filled in per release (Zenodo mints the DOI on each GitHub release).
+# version, date-released and the version DOI are bumped on each release; the concept DOI is stable.
