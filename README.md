@@ -18,7 +18,7 @@ and environmental domains.
 - Genomic sequence and nucleic-acid records
 - Literature and project coordination, with role-based access control
 - Interactive dashboards (Chart.js) and geographic maps (Leaflet)
-- CSV import/export and a versioned REST API for external analytical workflows
+- CSV and Excel (.xlsx) import/export, plus a versioned REST API for external analytical workflows
 
 ## Tech stack
 
