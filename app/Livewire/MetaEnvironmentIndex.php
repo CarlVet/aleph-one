@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Models\Countries;
 use App\Models\EnvironmentSampleTypes;
@@ -16,6 +17,7 @@ use Livewire\WithPagination;
 
 class MetaEnvironmentIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -280,10 +282,8 @@ class MetaEnvironmentIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'meta_environments.csv';
-
         $query = MetaEnvironment::with(
             'studies',
             'countries',
@@ -310,40 +310,28 @@ class MetaEnvironmentIndex extends PlainComponent
 
         $meta_environments = $query->get();
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
+        $headers = ['Study', 'Sample Type', 'Location', 'Country', 'Date Sampling', 'Pathogen', 'Technique', 'Tested N', 'Positive N', 'Risk Factor', 'Sub-project', 'Scientist'];
 
-        $callback = function () use ($meta_environments) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, ['Study', 'Sample Type', 'Location', 'Country', 'Date Sampling', 'Pathogen', 'Technique', 'Tested N', 'Positive N', 'Risk Factor', 'Sub-project', 'Scientist']);
+        $rows = $meta_environments->map(function ($meta) {
+            $riskFactors = $meta->risk_factors->pluck('name')->filter()->unique()->implode(', ');
 
-            foreach ($meta_environments as $meta) {
-                $riskFactors = $meta->risk_factors->pluck('name')->filter()->unique()->implode(', ');
-                fputcsv($file, [
-                    $meta->studies->ref_key,
-                    $meta->environment_sample_types->name,
-                    $meta->location,
-                    $meta->countries->name,
-                    $meta->date_sampling,
-                    $meta->pathogens->species,
-                    $meta->techniques->name,
-                    $meta->tested_n,
-                    $meta->pos_n,
-                    $riskFactors !== '' ? $riskFactors : 'N/A',
-                    data_get($meta, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    $meta->people->first_name.' '.$meta->people->last_name,
-                ]);
-            }
+            return [
+                $meta->studies->ref_key,
+                $meta->environment_sample_types->name,
+                $meta->location,
+                $meta->countries->name,
+                $meta->date_sampling,
+                $meta->pathogens->species,
+                $meta->techniques->name,
+                $meta->tested_n,
+                $meta->pos_n,
+                $riskFactors !== '' ? $riskFactors : 'N/A',
+                data_get($meta, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                $meta->people->first_name.' '.$meta->people->last_name,
+            ];
+        });
 
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable('meta_environments', $headers, $rows, $format);
     }
 
     public function render()

@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\SequencesForm;
 use App\Models\AnimalSamples;
@@ -19,12 +20,14 @@ use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Title;
 use Livewire\WithPagination;
 
 #[Title('Sequences Index')]
 class SequencesIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -560,7 +563,7 @@ class SequencesIndex extends PlainComponent
         });
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
         $fileName = match ($this->selectedTable) {
             'human_sequences_table' => 'sequences_human.csv',
@@ -662,156 +665,143 @@ class SequencesIndex extends PlainComponent
 
         $sequences = $query->get();
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
-
-        $callback = function () use ($sequences) {
-            $file = fopen('php://output', 'w');
-            $baseHeader = ['Sequence code', 'Accession number', 'Experiment code', 'Original content type', 'Original content code', 'Sub-project'];
-            $detailsHeader = match ($this->selectedTable) {
-                'human_sequences_table' => ['Patient code', 'Sample type', 'Occupation', 'Sex', 'Age', 'Country', 'Ethnicity'],
-                'animal_sequences_table' => ['Animal code', 'Animal species', 'Sample type', 'Sex', 'Age'],
-                'environment_sequences_table' => ['Sample type'],
-                'parasite_sequences_table' => ['Parasite species', 'Stage', 'Sex', 'State', 'Sample type'],
-                'culture_sequences_table' => ['Culture code', 'Medium', 'Culture type'],
-                'pool_sequences_table' => ['Pool code', 'Nr pooled'],
-                default => ['Original content details'],
-            };
-
-            $tailHeader = ['Length (nt)', 'Target pathogen', 'Method', 'Instrument', 'Date sequenced', 'Sequenced by', 'Sequenced at', 'Project'];
-
-            fputcsv($file, array_merge($baseHeader, $detailsHeader, $tailHeader));
-
-            foreach ($sequences as $sequence) {
-                $nucleic = $sequence->nucleic_acids;
-                $experiment = ($nucleic && $nucleic->nucleic_content instanceof Experiments) ? $nucleic->nucleic_content : null;
-
-                $originalNucleic = ($experiment && $experiment->experiments_content instanceof NucleicAcids) ? $experiment->experiments_content : null;
-                $source = $originalNucleic?->nucleic_content ?? $nucleic?->nucleic_content;
-
-                $sourceType = $source ? class_basename($source) : 'N/A';
-                $sourceCode = $source->code ?? 'N/A';
-
-                $detailCells = match ($this->selectedTable) {
-                    'human_sequences_table' => (function () use ($source) {
-                        $human = $source instanceof HumanSamples ? $source->humans : null;
-                        $age = $human?->date_of_birth ? Carbon::parse($human->date_of_birth)->age : null;
-
-                        return [
-                            $human?->code ?? 'N/A',
-                            $source instanceof HumanSamples ? ($source->sample_types?->name ?? 'N/A') : 'N/A',
-                            $human?->occupation ?? 'N/A',
-                            $human?->sex ?? 'N/A',
-                            $age !== null ? (string) $age : 'N/A',
-                            $human?->countries?->name ?? 'N/A',
-                            $human?->ethnicity ?? 'N/A',
-                        ];
-                    })(),
-                    'animal_sequences_table' => (function () use ($source) {
-                        $animal = $source instanceof AnimalSamples ? $source->animals : null;
-
-                        return [
-                            $animal?->code ?? 'N/A',
-                            $animal?->animal_species?->name_common ?? 'N/A',
-                            $source instanceof AnimalSamples ? ($source->sample_types?->name ?? 'N/A') : 'N/A',
-                            $animal?->sex ?? 'N/A',
-                            $animal?->age ?? 'N/A',
-                        ];
-                    })(),
-                    'environment_sequences_table' => [
-                        $source instanceof EnvironmentSamples ? ($source->environment_sample_types?->name ?? 'N/A') : 'N/A',
-                    ],
-                    'parasite_sequences_table' => (function () use ($source) {
-                        $parasite = $source instanceof ParasiteSamples ? $source->parasites : null;
-
-                        return [
-                            $parasite?->parasite_species?->name_scientific ?? 'N/A',
-                            $parasite?->stage ?? 'N/A',
-                            $parasite?->sex ?? 'N/A',
-                            $parasite?->state ?? 'N/A',
-                            $source instanceof ParasiteSamples ? ($source->parasite_sample_types?->name ?? 'N/A') : 'N/A',
-                        ];
-                    })(),
-                    'culture_sequences_table' => [
-                        $source instanceof Cultures ? ($source->code ?? 'N/A') : 'N/A',
-                        $source instanceof Cultures ? ($source->medium ?? 'N/A') : 'N/A',
-                        $source instanceof Cultures ? ($source->type ?? 'N/A') : 'N/A',
-                    ],
-                    'pool_sequences_table' => [
-                        $source instanceof Pools ? ($source->code ?? 'N/A') : 'N/A',
-                        $source instanceof Pools ? (string) ($source->nr_pooled ?? 'N/A') : 'N/A',
-                    ],
-                    default => (function () use ($source) {
-                        if (! $source) {
-                            return ['N/A'];
-                        }
-
-                        $details = match (class_basename($source)) {
-                            'HumanSamples' => trim(implode(' | ', array_filter([
-                                $source->humans?->code ?? null,
-                                $source->sample_types?->name ?? null,
-                            ]))),
-                            'AnimalSamples' => trim(implode(' | ', array_filter([
-                                $source->animals?->code ?? null,
-                                $source->animals?->animal_species?->name_common ?? null,
-                                $source->sample_types?->name ?? null,
-                            ]))),
-                            'EnvironmentSamples' => $source->environment_sample_types?->name ?? '',
-                            'ParasiteSamples' => trim(implode(' | ', array_filter([
-                                $source->parasites?->parasite_species?->name_scientific ?? null,
-                                $source->parasites?->stage ?? null,
-                                $source->parasites?->sex ?? null,
-                            ]))),
-                            'Cultures' => trim(implode(' | ', array_filter([
-                                $source->code ?? null,
-                                $source->medium ?? null,
-                                $source->type ?? null,
-                            ]))),
-                            'Pools' => trim(implode(' | ', array_filter([
-                                $source->code ?? null,
-                                $source->nr_pooled ?? null,
-                            ]))),
-                            default => '',
-                        };
-
-                        return [$details ?: 'N/A'];
-                    })(),
-                };
-
-                $row = array_merge(
-                    [
-                        $sequence->code,
-                        $sequence->accession_number,
-                        $experiment?->code ?? 'N/A',
-                        $sourceType,
-                        $sourceCode,
-                        data_get($sequence, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    ],
-                    $detailCells,
-                    [
-                        $sequence->length,
-                        $experiment?->pathogens?->species ?? 'N/A',
-                        $sequence->method,
-                        $sequence->instrument,
-                        $sequence->date_sequenced,
-                        trim(($sequence->people->first_name ?? '').' '.($sequence->people->last_name ?? '')) ?: 'N/A',
-                        $sequence->laboratories->name ?? 'N/A',
-                        $sequence->projects->code ?? 'N/A',
-                    ]
-                );
-
-                fputcsv($file, $row);
-            }
-
-            fclose($file);
+        $baseHeader = ['Sequence code', 'Accession number', 'Experiment code', 'Original content type', 'Original content code', 'Sub-project'];
+        $detailsHeader = match ($this->selectedTable) {
+            'human_sequences_table' => ['Patient code', 'Sample type', 'Occupation', 'Sex', 'Age', 'Country', 'Ethnicity'],
+            'animal_sequences_table' => ['Animal code', 'Animal species', 'Sample type', 'Sex', 'Age'],
+            'environment_sequences_table' => ['Sample type'],
+            'parasite_sequences_table' => ['Parasite species', 'Stage', 'Sex', 'State', 'Sample type'],
+            'culture_sequences_table' => ['Culture code', 'Medium', 'Culture type'],
+            'pool_sequences_table' => ['Pool code', 'Nr pooled'],
+            default => ['Original content details'],
         };
 
-        return response()->stream($callback, 200, $headers);
+        $tailHeader = ['Length (nt)', 'Target pathogen', 'Method', 'Instrument', 'Date sequenced', 'Sequenced by', 'Sequenced at', 'Project'];
+
+        $headers = array_merge($baseHeader, $detailsHeader, $tailHeader);
+
+        $rows = $sequences->map(function ($sequence) {
+            $nucleic = $sequence->nucleic_acids;
+            $experiment = ($nucleic && $nucleic->nucleic_content instanceof Experiments) ? $nucleic->nucleic_content : null;
+
+            $originalNucleic = ($experiment && $experiment->experiments_content instanceof NucleicAcids) ? $experiment->experiments_content : null;
+            $source = $originalNucleic?->nucleic_content ?? $nucleic?->nucleic_content;
+
+            $sourceType = $source ? class_basename($source) : 'N/A';
+            $sourceCode = $source->code ?? 'N/A';
+
+            $detailCells = match ($this->selectedTable) {
+                'human_sequences_table' => (function () use ($source) {
+                    $human = $source instanceof HumanSamples ? $source->humans : null;
+                    $age = $human?->date_of_birth ? Carbon::parse($human->date_of_birth)->age : null;
+
+                    return [
+                        $human?->code ?? 'N/A',
+                        $source instanceof HumanSamples ? ($source->sample_types?->name ?? 'N/A') : 'N/A',
+                        $human?->occupation ?? 'N/A',
+                        $human?->sex ?? 'N/A',
+                        $age !== null ? (string) $age : 'N/A',
+                        $human?->countries?->name ?? 'N/A',
+                        $human?->ethnicity ?? 'N/A',
+                    ];
+                })(),
+                'animal_sequences_table' => (function () use ($source) {
+                    $animal = $source instanceof AnimalSamples ? $source->animals : null;
+
+                    return [
+                        $animal?->code ?? 'N/A',
+                        $animal?->animal_species?->name_common ?? 'N/A',
+                        $source instanceof AnimalSamples ? ($source->sample_types?->name ?? 'N/A') : 'N/A',
+                        $animal?->sex ?? 'N/A',
+                        $animal?->age ?? 'N/A',
+                    ];
+                })(),
+                'environment_sequences_table' => [
+                    $source instanceof EnvironmentSamples ? ($source->environment_sample_types?->name ?? 'N/A') : 'N/A',
+                ],
+                'parasite_sequences_table' => (function () use ($source) {
+                    $parasite = $source instanceof ParasiteSamples ? $source->parasites : null;
+
+                    return [
+                        $parasite?->parasite_species?->name_scientific ?? 'N/A',
+                        $parasite?->stage ?? 'N/A',
+                        $parasite?->sex ?? 'N/A',
+                        $parasite?->state ?? 'N/A',
+                        $source instanceof ParasiteSamples ? ($source->parasite_sample_types?->name ?? 'N/A') : 'N/A',
+                    ];
+                })(),
+                'culture_sequences_table' => [
+                    $source instanceof Cultures ? ($source->code ?? 'N/A') : 'N/A',
+                    $source instanceof Cultures ? ($source->medium ?? 'N/A') : 'N/A',
+                    $source instanceof Cultures ? ($source->type ?? 'N/A') : 'N/A',
+                ],
+                'pool_sequences_table' => [
+                    $source instanceof Pools ? ($source->code ?? 'N/A') : 'N/A',
+                    $source instanceof Pools ? (string) ($source->nr_pooled ?? 'N/A') : 'N/A',
+                ],
+                default => (function () use ($source) {
+                    if (! $source) {
+                        return ['N/A'];
+                    }
+
+                    $details = match (class_basename($source)) {
+                        'HumanSamples' => trim(implode(' | ', array_filter([
+                            $source->humans?->code ?? null,
+                            $source->sample_types?->name ?? null,
+                        ]))),
+                        'AnimalSamples' => trim(implode(' | ', array_filter([
+                            $source->animals?->code ?? null,
+                            $source->animals?->animal_species?->name_common ?? null,
+                            $source->sample_types?->name ?? null,
+                        ]))),
+                        'EnvironmentSamples' => $source->environment_sample_types?->name ?? '',
+                        'ParasiteSamples' => trim(implode(' | ', array_filter([
+                            $source->parasites?->parasite_species?->name_scientific ?? null,
+                            $source->parasites?->stage ?? null,
+                            $source->parasites?->sex ?? null,
+                        ]))),
+                        'Cultures' => trim(implode(' | ', array_filter([
+                            $source->code ?? null,
+                            $source->medium ?? null,
+                            $source->type ?? null,
+                        ]))),
+                        'Pools' => trim(implode(' | ', array_filter([
+                            $source->code ?? null,
+                            $source->nr_pooled ?? null,
+                        ]))),
+                        default => '',
+                    };
+
+                    return [$details ?: 'N/A'];
+                })(),
+            };
+
+            $row = array_merge(
+                [
+                    $sequence->code,
+                    $sequence->accession_number,
+                    $experiment?->code ?? 'N/A',
+                    $sourceType,
+                    $sourceCode,
+                    data_get($sequence, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                ],
+                $detailCells,
+                [
+                    $sequence->length,
+                    $experiment?->pathogens?->species ?? 'N/A',
+                    $sequence->method,
+                    $sequence->instrument,
+                    $sequence->date_sequenced,
+                    trim(($sequence->people->first_name ?? '').' '.($sequence->people->last_name ?? '')) ?: 'N/A',
+                    $sequence->laboratories->name ?? 'N/A',
+                    $sequence->projects->code ?? 'N/A',
+                ]
+            );
+
+            return $row;
+        });
+
+        return $this->exportTable(Str::replaceLast('.csv', '', $fileName), $headers, $rows, $format);
     }
 
     public function render()

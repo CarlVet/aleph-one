@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\NucleicAcidsForm;
 use App\Models\AnimalSamples;
@@ -20,12 +21,14 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Title;
 use Livewire\WithPagination;
 
 #[Title('Nucleic Acids Index')]
 class NucleicAcidsIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -692,7 +695,7 @@ class NucleicAcidsIndex extends PlainComponent
         return $this->applySorting($query, $this->sortMap(), ['created_at', 'desc']);
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
         $config = $this->selectedTableConfig();
         $fileName = $config['csvFile'];
@@ -701,115 +704,101 @@ class NucleicAcidsIndex extends PlainComponent
 
         $selectedTable = $this->selectedTable;
 
-        $callback = function () use ($query, $selectedTable) {
-            $file = fopen('php://output', 'w');
+        if ($selectedTable === 'human_samples_table') {
+            $headers = ['Tube code', 'Sub-project', 'Nucleic acid code', 'Nucleic acid type', 'Extraction protocol', 'Extracted by', 'Extracted at', 'Date extracted', 'Elution type', 'Volume', 'Patient code', 'Sampling site', 'Sample type'];
+        } elseif ($selectedTable === 'animal_samples_table') {
+            $headers = ['Tube code', 'Alias code', 'Sub-project', 'Nucleic acid code', 'Nucleic acid type', 'Extraction protocol', 'Extracted by', 'Extracted at', 'Date extracted', 'Elution type', 'Volume', 'Sample code', 'Species', 'Sampling site', 'Sample type'];
+        } elseif ($selectedTable === 'environment_samples_table') {
+            $headers = ['Tube code', 'Alias code', 'Sub-project', 'Nucleic acid code', 'Nucleic acid type', 'Extraction protocol', 'Extracted by', 'Extracted at', 'Date extracted', 'Elution type', 'Volume', 'Sample code', 'Sampling site', 'Sample type'];
+        } else {
+            $headers = ['Nucleic tube code', 'Sub-project', 'Content type', 'Content code', 'Elution type', 'Nucleic acid type', 'Extraction protocol', 'Extracted by', 'Extracted at', 'Date extracted', 'Volume'];
+        }
 
+        $rows = $query->get()->map(function ($tube) use ($selectedTable) {
             if ($selectedTable === 'human_samples_table') {
-                fputcsv($file, ['Tube code', 'Sub-project', 'Nucleic acid code', 'Nucleic acid type', 'Extraction protocol', 'Extracted by', 'Extracted at', 'Date extracted', 'Elution type', 'Volume', 'Patient code', 'Sampling site', 'Sample type']);
-            } elseif ($selectedTable === 'animal_samples_table') {
-                fputcsv($file, ['Tube code', 'Alias code', 'Sub-project', 'Nucleic acid code', 'Nucleic acid type', 'Extraction protocol', 'Extracted by', 'Extracted at', 'Date extracted', 'Elution type', 'Volume', 'Sample code', 'Species', 'Sampling site', 'Sample type']);
-            } elseif ($selectedTable === 'environment_samples_table') {
-                fputcsv($file, ['Tube code', 'Alias code', 'Sub-project', 'Nucleic acid code', 'Nucleic acid type', 'Extraction protocol', 'Extracted by', 'Extracted at', 'Date extracted', 'Elution type', 'Volume', 'Sample code', 'Sampling site', 'Sample type']);
-            } else {
-                fputcsv($file, ['Nucleic tube code', 'Sub-project', 'Content type', 'Content code', 'Elution type', 'Nucleic acid type', 'Extraction protocol', 'Extracted by', 'Extracted at', 'Date extracted', 'Volume']);
+                return [
+                    $tube->code ?? 'N/A',
+                    data_get($tube, 'tubes_content.subProjectAssignment.subProject.code') ?? 'N/A',
+                    $tube->tubes_content?->code ?? 'N/A',
+                    $tube->tubes_content?->type ?? 'N/A',
+                    $tube->tubes_content?->protocols?->name ?? 'N/A',
+                    trim((string) (($tube->tubes_content?->people?->title ? $tube->tubes_content?->people?->title.' ' : '').($tube->tubes_content?->people?->first_name ?? '').' '.($tube->tubes_content?->people?->last_name ?? ''))) ?: 'N/A',
+                    $tube->tubes_content?->laboratories?->name ?? 'N/A',
+                    $tube->tubes_content?->date_extracted ? Carbon::parse($tube->tubes_content->date_extracted)->format('Y-m-d') : 'N/A',
+                    $tube->preservant ?? 'N/A',
+                    $tube->tubes_content?->volume ?? 'N/A',
+                    data_get($tube, 'tubes_content.nucleic_content.humans.code', 'N/A'),
+                    data_get($tube, 'tubes_content.nucleic_content.sampling_sites.name', 'N/A'),
+                    data_get($tube, 'tubes_content.nucleic_content.sample_types.name', 'N/A'),
+                ];
             }
 
-            $query->chunk(500, function ($tubes) use ($file, $selectedTable) {
-                foreach ($tubes as $tube) {
-                    if ($selectedTable === 'human_samples_table') {
-                        fputcsv($file, [
-                            $tube->code ?? 'N/A',
-                            data_get($tube, 'tubes_content.subProjectAssignment.subProject.code') ?? 'N/A',
-                            $tube->tubes_content?->code ?? 'N/A',
-                            $tube->tubes_content?->type ?? 'N/A',
-                            $tube->tubes_content?->protocols?->name ?? 'N/A',
-                            trim((string) (($tube->tubes_content?->people?->title ? $tube->tubes_content?->people?->title.' ' : '').($tube->tubes_content?->people?->first_name ?? '').' '.($tube->tubes_content?->people?->last_name ?? ''))) ?: 'N/A',
-                            $tube->tubes_content?->laboratories?->name ?? 'N/A',
-                            $tube->tubes_content?->date_extracted ? Carbon::parse($tube->tubes_content->date_extracted)->format('Y-m-d') : 'N/A',
-                            $tube->preservant ?? 'N/A',
-                            $tube->tubes_content?->volume ?? 'N/A',
-                            data_get($tube, 'tubes_content.nucleic_content.humans.code', 'N/A'),
-                            data_get($tube, 'tubes_content.nucleic_content.sampling_sites.name', 'N/A'),
-                            data_get($tube, 'tubes_content.nucleic_content.sample_types.name', 'N/A'),
-                        ]);
+            if ($selectedTable === 'animal_samples_table') {
+                return [
+                    $tube->code ?? 'N/A',
+                    $tube->alias_code ?? 'N/A',
+                    data_get($tube, 'tubes_content.subProjectAssignment.subProject.code') ?? 'N/A',
+                    $tube->tubes_content?->code ?? 'N/A',
+                    $tube->tubes_content?->type ?? 'N/A',
+                    $tube->tubes_content?->protocols?->name ?? 'N/A',
+                    trim((string) (($tube->tubes_content?->people?->title ? $tube->tubes_content?->people?->title.' ' : '').($tube->tubes_content?->people?->first_name ?? '').' '.($tube->tubes_content?->people?->last_name ?? ''))) ?: 'N/A',
+                    $tube->tubes_content?->laboratories?->name ?? 'N/A',
+                    $tube->tubes_content?->date_extracted ? Carbon::parse($tube->tubes_content->date_extracted)->format('Y-m-d') : 'N/A',
+                    $tube->preservant ?? 'N/A',
+                    $tube->tubes_content?->volume ?? 'N/A',
+                    data_get($tube, 'tubes_content.nucleic_content.code', 'N/A'),
+                    data_get($tube, 'tubes_content.nucleic_content.animals.animal_species.name_common', 'N/A'),
+                    data_get($tube, 'tubes_content.nucleic_content.sampling_sites.name', 'N/A'),
+                    data_get($tube, 'tubes_content.nucleic_content.sample_types.name', 'N/A'),
+                ];
+            }
 
-                        continue;
-                    }
+            if ($selectedTable === 'environment_samples_table') {
+                return [
+                    $tube->code ?? 'N/A',
+                    $tube->alias_code ?? 'N/A',
+                    data_get($tube, 'tubes_content.subProjectAssignment.subProject.code') ?? 'N/A',
+                    $tube->tubes_content?->code ?? 'N/A',
+                    $tube->tubes_content?->type ?? 'N/A',
+                    $tube->tubes_content?->protocols?->name ?? 'N/A',
+                    trim((string) (($tube->tubes_content?->people?->title ? $tube->tubes_content?->people?->title.' ' : '').($tube->tubes_content?->people?->first_name ?? '').' '.($tube->tubes_content?->people?->last_name ?? ''))) ?: 'N/A',
+                    $tube->tubes_content?->laboratories?->name ?? 'N/A',
+                    $tube->tubes_content?->date_extracted ? Carbon::parse($tube->tubes_content->date_extracted)->format('Y-m-d') : 'N/A',
+                    $tube->preservant ?? 'N/A',
+                    $tube->tubes_content?->volume ?? 'N/A',
+                    data_get($tube, 'tubes_content.nucleic_content.code', 'N/A'),
+                    data_get($tube, 'tubes_content.nucleic_content.sampling_sites.name', 'N/A'),
+                    data_get($tube, 'tubes_content.nucleic_content.environment_sample_types.name', 'N/A'),
+                ];
+            }
 
-                    if ($selectedTable === 'animal_samples_table') {
-                        fputcsv($file, [
-                            $tube->code ?? 'N/A',
-                            $tube->alias_code ?? 'N/A',
-                            data_get($tube, 'tubes_content.subProjectAssignment.subProject.code') ?? 'N/A',
-                            $tube->tubes_content?->code ?? 'N/A',
-                            $tube->tubes_content?->type ?? 'N/A',
-                            $tube->tubes_content?->protocols?->name ?? 'N/A',
-                            trim((string) (($tube->tubes_content?->people?->title ? $tube->tubes_content?->people?->title.' ' : '').($tube->tubes_content?->people?->first_name ?? '').' '.($tube->tubes_content?->people?->last_name ?? ''))) ?: 'N/A',
-                            $tube->tubes_content?->laboratories?->name ?? 'N/A',
-                            $tube->tubes_content?->date_extracted ? Carbon::parse($tube->tubes_content->date_extracted)->format('Y-m-d') : 'N/A',
-                            $tube->preservant ?? 'N/A',
-                            $tube->tubes_content?->volume ?? 'N/A',
-                            data_get($tube, 'tubes_content.nucleic_content.code', 'N/A'),
-                            data_get($tube, 'tubes_content.nucleic_content.animals.animal_species.name_common', 'N/A'),
-                            data_get($tube, 'tubes_content.nucleic_content.sampling_sites.name', 'N/A'),
-                            data_get($tube, 'tubes_content.nucleic_content.sample_types.name', 'N/A'),
-                        ]);
+            $contentType = match ($tube->tubes_content?->nucleic_content_type) {
+                'App\Models\HumanSamples' => 'Human Sample',
+                'App\Models\AnimalSamples' => 'Animal Sample',
+                'App\Models\EnvironmentSamples' => 'Environment Sample',
+                'App\Models\ParasiteSamples' => 'Parasite Sample',
+                'App\Models\Experiments' => 'Experiment',
+                'App\Models\Cultures' => 'Culture',
+                'App\Models\Pools' => 'Pool',
+                default => 'Unknown',
+            };
 
-                        continue;
-                    }
+            return [
+                $tube->code ?? 'N/A',
+                data_get($tube, 'tubes_content.subProjectAssignment.subProject.code') ?? 'N/A',
+                $contentType,
+                data_get($tube, 'tubes_content.nucleic_content.code', 'N/A'),
+                $tube->preservant ?? 'N/A',
+                $tube->tubes_content?->type ?? 'N/A',
+                $tube->tubes_content?->protocols?->name ?? 'N/A',
+                trim((string) (($tube->tubes_content?->people?->title ? $tube->tubes_content?->people?->title.' ' : '').($tube->tubes_content?->people?->first_name ?? '').' '.($tube->tubes_content?->people?->last_name ?? ''))) ?: 'N/A',
+                $tube->tubes_content?->laboratories?->name ?? 'N/A',
+                $tube->tubes_content?->date_extracted ? Carbon::parse($tube->tubes_content->date_extracted)->format('Y-m-d') : 'N/A',
+                $tube->tubes_content?->volume ?? 'N/A',
+            ];
+        });
 
-                    if ($selectedTable === 'environment_samples_table') {
-                        fputcsv($file, [
-                            $tube->code ?? 'N/A',
-                            $tube->alias_code ?? 'N/A',
-                            data_get($tube, 'tubes_content.subProjectAssignment.subProject.code') ?? 'N/A',
-                            $tube->tubes_content?->code ?? 'N/A',
-                            $tube->tubes_content?->type ?? 'N/A',
-                            $tube->tubes_content?->protocols?->name ?? 'N/A',
-                            trim((string) (($tube->tubes_content?->people?->title ? $tube->tubes_content?->people?->title.' ' : '').($tube->tubes_content?->people?->first_name ?? '').' '.($tube->tubes_content?->people?->last_name ?? ''))) ?: 'N/A',
-                            $tube->tubes_content?->laboratories?->name ?? 'N/A',
-                            $tube->tubes_content?->date_extracted ? Carbon::parse($tube->tubes_content->date_extracted)->format('Y-m-d') : 'N/A',
-                            $tube->preservant ?? 'N/A',
-                            $tube->tubes_content?->volume ?? 'N/A',
-                            data_get($tube, 'tubes_content.nucleic_content.code', 'N/A'),
-                            data_get($tube, 'tubes_content.nucleic_content.sampling_sites.name', 'N/A'),
-                            data_get($tube, 'tubes_content.nucleic_content.environment_sample_types.name', 'N/A'),
-                        ]);
-
-                        continue;
-                    }
-
-                    $contentType = match ($tube->tubes_content?->nucleic_content_type) {
-                        'App\Models\HumanSamples' => 'Human Sample',
-                        'App\Models\AnimalSamples' => 'Animal Sample',
-                        'App\Models\EnvironmentSamples' => 'Environment Sample',
-                        'App\Models\ParasiteSamples' => 'Parasite Sample',
-                        'App\Models\Experiments' => 'Experiment',
-                        'App\Models\Cultures' => 'Culture',
-                        'App\Models\Pools' => 'Pool',
-                        default => 'Unknown',
-                    };
-
-                    fputcsv($file, [
-                        $tube->code ?? 'N/A',
-                        data_get($tube, 'tubes_content.subProjectAssignment.subProject.code') ?? 'N/A',
-                        $contentType,
-                        data_get($tube, 'tubes_content.nucleic_content.code', 'N/A'),
-                        $tube->preservant ?? 'N/A',
-                        $tube->tubes_content?->type ?? 'N/A',
-                        $tube->tubes_content?->protocols?->name ?? 'N/A',
-                        trim((string) (($tube->tubes_content?->people?->title ? $tube->tubes_content?->people?->title.' ' : '').($tube->tubes_content?->people?->first_name ?? '').' '.($tube->tubes_content?->people?->last_name ?? ''))) ?: 'N/A',
-                        $tube->tubes_content?->laboratories?->name ?? 'N/A',
-                        $tube->tubes_content?->date_extracted ? Carbon::parse($tube->tubes_content->date_extracted)->format('Y-m-d') : 'N/A',
-                        $tube->tubes_content?->volume ?? 'N/A',
-                    ]);
-                }
-            });
-
-            fclose($file);
-        };
-
-        return response()->streamDownload($callback, $fileName);
+        return $this->exportTable(Str::replaceLast('.csv', '', $fileName), $headers, $rows, $format);
     }
 
     public function render()

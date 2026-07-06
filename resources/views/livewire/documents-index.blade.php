@@ -94,11 +94,7 @@
                         <i class="fas fa-upload mr-2"></i>
                         Upload Document
                     </button>
-                    <button wire:click="exportDocuments" 
-                            class="bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium py-3 px-6 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 transform hover:scale-105 shadow-lg">
-                        <i class="fas fa-download mr-2"></i>
-                        Export List
-                    </button>
+                    @include('livewire.partials.export-buttons')
                     <button wire:click="deleteSelected"
                             wire:confirm="Are you sure you want to delete the selected documents?"
                             class="bg-gradient-to-r from-red-600 to-red-700 text-white font-medium py-3 px-6 rounded-lg hover:from-red-700 hover:to-red-800 transition-all duration-200 transform hover:scale-105 shadow-lg">

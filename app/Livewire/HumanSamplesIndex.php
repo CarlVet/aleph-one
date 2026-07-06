@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Models\HumanSamples;
 use App\Models\Projects;
@@ -18,6 +19,7 @@ use Livewire\WithPagination;
 
 class HumanSamplesIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithFileUploads;
     use WithPagination;
@@ -428,10 +430,8 @@ class HumanSamplesIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'human_samples.csv';
-
         $query = HumanSamples::with([
             'humans',
             'sample_types',
@@ -468,54 +468,37 @@ class HumanSamplesIndex extends PlainComponent
         $query = $this->applyFilters($query);
         $query = $this->applySorting($query, $this->sortMap(), ['created_at', 'desc']);
 
-        $samples = $query->get();
-
         $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
+            'Sample Code',
+            'Sub-project',
+            'Patient Name',
+            'Sample Type',
+            'Collection Date',
+            'Collector',
+            'Sampling Site',
+            'Area',
+            'Coordinates',
+            'Purpose',
+            'Storage State',
+            'Processed',
         ];
 
-        $callback = function () use ($samples) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, [
-                'Sample Code',
-                'Sub-project',
-                'Patient Name',
-                'Sample Type',
-                'Collection Date',
-                'Collector',
-                'Sampling Site',
-                'Area',
-                'Coordinates',
-                'Purpose',
-                'Storage State',
-                'Processed',
-            ]);
+        $rows = $query->get()->map(fn ($sample) => [
+            $sample->code,
+            data_get($sample, 'subProjectAssignment.subProject.code') ?? 'N/A',
+            $sample->humans->first_name.' '.$sample->humans->last_name,
+            $sample->sample_types->name,
+            $sample->date_collected,
+            $sample->people->first_name.' '.$sample->people->last_name,
+            $sample->sampling_sites->name,
+            $sample->area,
+            $sample->latitude && $sample->longitude ? "{$sample->latitude}, {$sample->longitude}" : 'N/A',
+            $sample->sample_purpose,
+            $sample->storage_state,
+            $sample->processed ? 'Yes' : 'No',
+        ]);
 
-            foreach ($samples as $sample) {
-                fputcsv($file, [
-                    $sample->code,
-                    data_get($sample, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    $sample->humans->first_name.' '.$sample->humans->last_name,
-                    $sample->sample_types->name,
-                    $sample->date_collected,
-                    $sample->people->first_name.' '.$sample->people->last_name,
-                    $sample->sampling_sites->name,
-                    $sample->area,
-                    $sample->latitude && $sample->longitude ? "{$sample->latitude}, {$sample->longitude}" : 'N/A',
-                    $sample->sample_purpose,
-                    $sample->storage_state,
-                    $sample->processed ? 'Yes' : 'No',
-                ]);
-            }
-
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable('human_samples', $headers, $rows, $format);
     }
 
     public function uploadPhoto($sampleId)

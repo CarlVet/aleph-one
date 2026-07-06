@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Models\AnimalSpecies;
 use App\Models\Countries;
@@ -17,6 +18,7 @@ use Livewire\WithPagination;
 
 class MetaAnimalIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -308,10 +310,8 @@ class MetaAnimalIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'meta_animals.csv';
-
         $query = MetaAnimal::with(
             'studies',
             'countries',
@@ -341,45 +341,33 @@ class MetaAnimalIndex extends PlainComponent
 
         $meta_animals = $query->get();
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
+        $headers = ['Study', 'Animal Species', 'Sample Type', 'Location', 'Country', 'Date Sampling', 'Pathogen', 'Technique', 'Tested N', 'Positive N', 'Risk Factors', 'Clinical Signs', 'Lesions', 'Sub-project', 'Scientist'];
 
-        $callback = function () use ($meta_animals) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, ['Study', 'Animal Species', 'Sample Type', 'Location', 'Country', 'Date Sampling', 'Pathogen', 'Technique', 'Tested N', 'Positive N', 'Risk Factors', 'Clinical Signs', 'Lesions', 'Sub-project', 'Scientist']);
+        $rows = $meta_animals->map(function ($meta) {
+            $riskFactors = $meta->risk_factors->pluck('name')->filter()->unique()->implode(', ');
+            $clinicalSigns = $meta->clinical_signs->pluck('name')->filter()->unique()->implode(', ');
+            $lesions = $meta->lesions->pluck('name')->filter()->unique()->implode(', ');
 
-            foreach ($meta_animals as $meta) {
-                $riskFactors = $meta->risk_factors->pluck('name')->filter()->unique()->implode(', ');
-                $clinicalSigns = $meta->clinical_signs->pluck('name')->filter()->unique()->implode(', ');
-                $lesions = $meta->lesions->pluck('name')->filter()->unique()->implode(', ');
-                fputcsv($file, [
-                    $meta->studies->ref_key,
-                    $meta->animal_species->name_common,
-                    $meta->sample_types->name,
-                    $meta->location,
-                    $meta->countries->name,
-                    $meta->date_sampling,
-                    $meta->pathogens->species,
-                    $meta->techniques?->name ?? 'N/A',
-                    $meta->tested_n,
-                    $meta->pos_n,
-                    $riskFactors !== '' ? $riskFactors : 'N/A',
-                    $clinicalSigns !== '' ? $clinicalSigns : 'N/A',
-                    $lesions !== '' ? $lesions : 'N/A',
-                    data_get($meta, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    $meta->people->first_name.' '.$meta->people->last_name,
-                ]);
-            }
+            return [
+                $meta->studies->ref_key,
+                $meta->animal_species->name_common,
+                $meta->sample_types->name,
+                $meta->location,
+                $meta->countries->name,
+                $meta->date_sampling,
+                $meta->pathogens->species,
+                $meta->techniques?->name ?? 'N/A',
+                $meta->tested_n,
+                $meta->pos_n,
+                $riskFactors !== '' ? $riskFactors : 'N/A',
+                $clinicalSigns !== '' ? $clinicalSigns : 'N/A',
+                $lesions !== '' ? $lesions : 'N/A',
+                data_get($meta, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                $meta->people->first_name.' '.$meta->people->last_name,
+            ];
+        });
 
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable('meta_animals', $headers, $rows, $format);
     }
 
     public function render()

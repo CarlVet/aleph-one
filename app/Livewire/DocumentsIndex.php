@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Models\Documents;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -10,6 +11,7 @@ use Livewire\WithFileUploads;
 
 class DocumentsIndex extends Component
 {
+    use ExportsTable;
     use WithFileUploads;
 
     public $search = '';
@@ -147,28 +149,23 @@ class DocumentsIndex extends Component
         );
     }
 
-    public function exportDocuments()
+    public function export(string $format = 'csv')
     {
         $documents = $this->getFilteredDocuments();
 
-        $csvContent = "Title,Description,Type,Size,Uploaded By,Upload Date,Tags\n";
+        $headers = ['Title', 'Description', 'Type', 'Size', 'Uploaded By', 'Upload Date', 'Tags'];
 
-        foreach ($documents as $document) {
-            $csvContent .= sprintf(
-                '"%s","%s","%s","%s","%s","%s","%s"'."\n",
-                $document->title,
-                $document->description ?? '',
-                $document->type ?? 'Unknown',
-                $document->size_formatted ?? '',
-                $document->uploaded_by ? $document->uploaded_by->first_name.' '.$document->uploaded_by->last_name : 'Unknown',
-                $document->created_at->format('Y-m-d'),
-                $document->tags ?? ''
-            );
-        }
+        $rows = $documents->map(fn ($document) => [
+            $document->title,
+            $document->description ?? '',
+            $document->type ?? 'Unknown',
+            $document->size_formatted ?? '',
+            $document->uploaded_by ? $document->uploaded_by->first_name.' '.$document->uploaded_by->last_name : 'Unknown',
+            $document->created_at->format('Y-m-d'),
+            $document->tags ?? '',
+        ]);
 
-        return response()->streamDownload(function () use ($csvContent) {
-            echo $csvContent;
-        }, 'documents_export_'.date('Y-m-d').'.csv');
+        return $this->exportTable('documents_export_'.date('Y-m-d'), $headers, $rows, $format);
     }
 
     private function getFilteredDocuments()

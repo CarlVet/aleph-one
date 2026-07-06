@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\PoolsForm;
 use App\Models\AnimalSamples;
@@ -18,12 +19,14 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Livewire\Attributes\Title;
 use Livewire\WithPagination;
 
 #[Title('Pools Index')]
 class PoolsIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -370,7 +373,7 @@ class PoolsIndex extends PlainComponent
         return $this->applySorting($query, $this->sortMap(), ['created_at', 'desc']);
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
         $config = $this->selectedTableConfig();
 
@@ -380,38 +383,34 @@ class PoolsIndex extends PlainComponent
 
         $query = $this->buildBaseQueryForSelectedTable();
 
-        $callback = function () use ($query, $headersRow, $rowBuilder) {
-            $file = fopen('php://output', 'w');
-            $headersRowWithSubProject = $headersRow;
-            array_splice($headersRowWithSubProject, 1, 0, 'Sub-project');
-            fputcsv($file, $headersRowWithSubProject);
+        $headers = $headersRow;
+        array_splice($headers, 1, 0, 'Sub-project');
 
-            $query->chunk(200, function ($tubes) use ($file, $rowBuilder) {
-                foreach ($tubes as $tube) {
-                    if (! is_callable($rowBuilder)) {
-                        continue;
-                    }
+        $rows = $query->get()->flatMap(function ($tube) use ($rowBuilder) {
+            if (! is_callable($rowBuilder)) {
+                return [];
+            }
 
-                    $rows = $rowBuilder($tube);
+            $rows = $rowBuilder($tube);
 
-                    $subProjectCode = data_get($tube, 'tubes_content.subProjectAssignment.subProject.code') ?? 'N/A';
+            $subProjectCode = data_get($tube, 'tubes_content.subProjectAssignment.subProject.code') ?? 'N/A';
 
-                    if (is_array($rows) && isset($rows[0]) && is_array($rows[0])) {
-                        foreach ($rows as $row) {
-                            array_splice($row, 1, 0, $subProjectCode);
-                            fputcsv($file, $row);
-                        }
-                    } else {
-                        array_splice($rows, 1, 0, $subProjectCode);
-                        fputcsv($file, $rows);
-                    }
+            if (is_array($rows) && isset($rows[0]) && is_array($rows[0])) {
+                $built = [];
+                foreach ($rows as $row) {
+                    array_splice($row, 1, 0, $subProjectCode);
+                    $built[] = $row;
                 }
-            });
 
-            fclose($file);
-        };
+                return $built;
+            }
 
-        return response()->streamDownload($callback, $fileName);
+            array_splice($rows, 1, 0, $subProjectCode);
+
+            return [$rows];
+        });
+
+        return $this->exportTable(Str::replaceLast('.csv', '', $fileName), $headers, $rows, $format);
     }
 
     public function render()

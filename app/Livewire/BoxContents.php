@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Models\AnimalSamples;
 use App\Models\Boxes;
 use App\Models\Cultures;
@@ -17,6 +18,8 @@ use Illuminate\Support\Facades\Auth;
 
 class BoxContents extends PlainComponent
 {
+    use ExportsTable;
+
     public $box;
 
     public $boxId;
@@ -474,7 +477,7 @@ class BoxContents extends PlainComponent
         $this->currentTube = null;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
         if (! $this->canView) {
             session()->flash('error', 'You do not have permission to export data from this box.');
@@ -482,53 +485,37 @@ class BoxContents extends PlainComponent
             return;
         }
 
-        $fileName = "box_{$this->box->code}_grid.csv";
+        // Write header row with column numbers
+        $headers = ['Position'];
+        for ($x = 1; $x <= $this->nColumns; $x++) {
+            $headers[] = "Column {$x}";
+        }
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
-
-        $callback = function () {
-            $file = fopen('php://output', 'w');
-
-            // Write header row with column numbers
-            $header = ['Position'];
+        // Write data rows
+        $rows = [];
+        for ($y = 1; $y <= $this->nRows; $y++) {
+            $row = ["Row {$y}"];
             for ($x = 1; $x <= $this->nColumns; $x++) {
-                $header[] = "Column {$x}";
-            }
-            fputcsv($file, $header);
+                $key = "{$x},{$y}";
+                $tubeData = $this->tubePositions[$key] ?? null;
+                if (! $tubeData) {
+                    $row[] = '-';
 
-            // Write data rows
-            for ($y = 1; $y <= $this->nRows; $y++) {
-                $row = ["Row {$y}"];
-                for ($x = 1; $x <= $this->nColumns; $x++) {
-                    $key = "{$x},{$y}";
-                    $tubeData = $this->tubePositions[$key] ?? null;
-                    if (! $tubeData) {
-                        $row[] = '-';
-
-                        continue;
-                    }
-
-                    if ($this->tubeCodeDisplay === 'alias') {
-                        $row[] = filled($tubeData['alias_code'] ?? null)
-                            ? (string) $tubeData['alias_code']
-                            : ((string) ($tubeData['code'] ?? '-') ?: '-');
-                    } else {
-                        $row[] = isset($tubeData['code']) ? $tubeData['code'] : '-';
-                    }
+                    continue;
                 }
-                fputcsv($file, $row);
+
+                if ($this->tubeCodeDisplay === 'alias') {
+                    $row[] = filled($tubeData['alias_code'] ?? null)
+                        ? (string) $tubeData['alias_code']
+                        : ((string) ($tubeData['code'] ?? '-') ?: '-');
+                } else {
+                    $row[] = isset($tubeData['code']) ? $tubeData['code'] : '-';
+                }
             }
+            $rows[] = $row;
+        }
 
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable("box_{$this->box->code}_grid", $headers, $rows, $format);
     }
 
     protected function getTubeTypeColor($tubeType)

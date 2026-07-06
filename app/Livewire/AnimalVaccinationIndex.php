@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\AnimalVaccinationForm;
 use App\Models\AnimalVaccination;
@@ -12,6 +13,7 @@ use Livewire\WithPagination;
 #[Title('Animal Vaccination Index')]
 class AnimalVaccinationIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -159,10 +161,8 @@ class AnimalVaccinationIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'animal_vaccinations.csv';
-
         $query = AnimalVaccination::with([
             'animals',
             'animals.animal_species',
@@ -184,37 +184,22 @@ class AnimalVaccinationIndex extends PlainComponent
         $query = $this->applyFilters($query);
         $this->applySorting($query, $this->sortMap(), ['created_at', 'desc']);
 
-        $vaccinationRecords = $query->get();
+        $headers = ['Animal Code', 'Species', 'Vaccine Name', 'Vaccine Type', 'Date Administered', 'Next Due Date', 'Administered By', 'Notes'];
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
+        $rows = $query->get()->map(function ($record) {
+            return [
+                $record->animals->code ?? 'N/A',
+                $record->animals->animal_species->name_common ?? 'N/A',
+                $record->vaccine_name ?? 'N/A',
+                $record->vaccine_type ?? 'N/A',
+                $record->date_administered ?? 'N/A',
+                $record->next_due_date ?? 'N/A',
+                $record->people->title.' '.$record->people->first_name.' '.$record->people->last_name ?? 'N/A',
+                $record->notes ?? 'N/A',
+            ];
+        });
 
-        $callback = function () use ($vaccinationRecords) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, ['Animal Code', 'Species', 'Vaccine Name', 'Vaccine Type', 'Date Administered', 'Next Due Date', 'Administered By', 'Notes']);
-
-            foreach ($vaccinationRecords as $record) {
-                fputcsv($file, [
-                    $record->animals->code ?? 'N/A',
-                    $record->animals->animal_species->name_common ?? 'N/A',
-                    $record->vaccine_name ?? 'N/A',
-                    $record->vaccine_type ?? 'N/A',
-                    $record->date_administered ?? 'N/A',
-                    $record->next_due_date ?? 'N/A',
-                    $record->people->title.' '.$record->people->first_name.' '.$record->people->last_name ?? 'N/A',
-                    $record->notes ?? 'N/A',
-                ]);
-            }
-
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable('animal_vaccinations', $headers, $rows, $format);
     }
 
     public function render()

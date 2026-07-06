@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Models\Boxes;
 use App\Models\BoxPositions;
@@ -12,6 +13,7 @@ use Livewire\WithPagination;
 
 class BoxPositionsList extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -245,10 +247,8 @@ class BoxPositionsList extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'box_positions.csv';
-
         $query = BoxPositions::with(
             'boxes',
             'boxes.projects',
@@ -266,41 +266,28 @@ class BoxPositionsList extends PlainComponent
 
         $box_positions = $query->get();
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
+        $headers = ['Box code', 'Box alias code', 'Content type', 'Sub-project', 'Date moved', 'Location (room)', 'Sub-location', 'Facility (country)', 'Moved by', 'Reason moved'];
 
-        $callback = function () use ($box_positions) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, ['Box code', 'Box alias code', 'Content type', 'Sub-project', 'Date moved', 'Location (room)', 'Sub-location', 'Facility (country)', 'Moved by', 'Reason moved']);
+        $rows = $box_positions->map(function ($box_position) {
+            $location = $box_position->locations;
+            $laboratory = $location?->laboratories;
+            $country = $laboratory?->countries;
 
-            foreach ($box_positions as $box_position) {
-                $location = $box_position->locations;
-                $laboratory = $location?->laboratories;
-                $country = $laboratory?->countries;
+            return [
+                $box_position->boxes?->code,
+                $box_position->boxes?->alias_code,
+                $box_position->boxes?->content_type,
+                data_get($box_position, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                $box_position->date_moved,
+                $location?->name ? $location->name.($location?->room ? ' ('.$location->room.')' : '') : null,
+                $box_position->sublocation,
+                $laboratory?->name ? $laboratory->name.($country?->name ? ' ('.$country->name.')' : '') : null,
+                $box_position->people?->title ? $box_position->people->title.' '.$box_position->people->first_name.' '.$box_position->people->last_name : null,
+                $box_position->reason,
+            ];
+        });
 
-                fputcsv($file, [
-                    $box_position->boxes?->code,
-                    $box_position->boxes?->alias_code,
-                    $box_position->boxes?->content_type,
-                    data_get($box_position, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    $box_position->date_moved,
-                    $location?->name ? $location->name.($location?->room ? ' ('.$location->room.')' : '') : null,
-                    $box_position->sublocation,
-                    $laboratory?->name ? $laboratory->name.($country?->name ? ' ('.$country->name.')' : '') : null,
-                    $box_position->people?->title ? $box_position->people->title.' '.$box_position->people->first_name.' '.$box_position->people->last_name : null,
-                    $box_position->reason,
-                ]);
-            }
-
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable('box_positions', $headers, $rows, $format);
     }
 
     public function render()

@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\MicroplasticsForm;
 use App\Models\AnimalSamples;
@@ -26,6 +27,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 #[Title('Microplastics Index')]
 class MicroplasticsIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -268,58 +270,51 @@ class MicroplasticsIndex extends PlainComponent
         ]);
     }
 
-    public function export(): StreamedResponse
+    public function export(string $format = 'csv'): StreamedResponse
     {
         $records = $this->filteredQuery()
             ->orderByDesc('id')
             ->get();
 
-        $filename = 'microplastics_export_'.now()->format('Y-m-d_H-i-s').'.csv';
         $sourceSpecificColumns = $this->sourceSpecificColumns();
         $sourceSpecificHeaders = array_map(
             fn (array $column): string => (string) ($column['key'] ?? 'source_specific'),
             $sourceSpecificColumns
         );
 
-        return response()->streamDownload(function () use ($records, $sourceSpecificHeaders): void {
-            $handle = fopen('php://output', 'w');
+        $headers = array_merge([
+            'code',
+            'source_type',
+            'source_code',
+        ], $sourceSpecificHeaders, [
+            'sub_project',
+            'mps_type',
+            'protocol',
+            'laboratory',
+            'identified_by',
+            'identification_date',
+            'sample_weight',
+            'r_coeff',
+            'm_feret',
+        ]);
 
-            fputcsv($handle, array_merge([
-                'code',
-                'source_type',
-                'source_code',
-            ], $sourceSpecificHeaders, [
-                'sub_project',
-                'mps_type',
-                'protocol',
-                'laboratory',
-                'identified_by',
-                'identification_date',
-                'sample_weight',
-                'r_coeff',
-                'm_feret',
-            ]));
+        $rows = $records->map(fn ($record) => array_merge([
+            $record->code,
+            class_basename((string) $record->microplastics_content_type),
+            $record->microplastics_content?->code,
+        ], $this->sourceSpecificExportValues($record), [
+            $record->subProject?->code,
+            $record->mps_types?->name,
+            $record->protocols?->name,
+            $record->laboratories?->name,
+            trim(($record->people?->title ?? '').' '.($record->people?->first_name ?? '').' '.($record->people?->last_name ?? '')),
+            optional($record->identification_date)?->format('Y-m-d'),
+            $record->sample_weight,
+            $record->r_coeff,
+            $record->m_feret,
+        ]));
 
-            foreach ($records as $record) {
-                fputcsv($handle, array_merge([
-                    $record->code,
-                    class_basename((string) $record->microplastics_content_type),
-                    $record->microplastics_content?->code,
-                ], $this->sourceSpecificExportValues($record), [
-                    $record->subProject?->code,
-                    $record->mps_types?->name,
-                    $record->protocols?->name,
-                    $record->laboratories?->name,
-                    trim(($record->people?->title ?? '').' '.($record->people?->first_name ?? '').' '.($record->people?->last_name ?? '')),
-                    optional($record->identification_date)?->format('Y-m-d'),
-                    $record->sample_weight,
-                    $record->r_coeff,
-                    $record->m_feret,
-                ]));
-            }
-
-            fclose($handle);
-        }, $filename);
+        return $this->exportTable('microplastics_export_'.now()->format('Y-m-d_H-i-s'), $headers, $rows, $format);
     }
 
     public function render()

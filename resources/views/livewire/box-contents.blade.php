@@ -68,11 +68,7 @@
                     @endif
                     
                     @if($canEdit)
-                        <button wire:click="export" 
-                            class="group relative inline-flex items-center justify-center mt-4 px-6 py-3 text-sm font-medium transition-all duration-300 ease-in-out transform hover:scale-105 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl shadow-lg hover:shadow-xl border border-green-600">
-                            <i class="fas fa-download mr-2 text-lg group-hover:translate-y-1 transition-transform duration-300"></i>
-                            Export CSV
-                        </button>
+                        @include('livewire.partials.export-buttons')
                         <button 
                             onclick="window.dispatchEvent(new CustomEvent('confirm-delete-box'))"
                             class="group relative inline-flex items-center justify-center mt-4 ml-2 px-6 py-3 text-sm font-medium transition-all duration-300 ease-in-out transform hover:scale-105 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl shadow-lg hover:shadow-xl border border-red-600">

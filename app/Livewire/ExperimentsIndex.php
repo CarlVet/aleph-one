@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\ExperimentsForm;
 use App\Models\AnimalSamples;
@@ -28,6 +29,7 @@ use Livewire\WithPagination;
 
 class ExperimentsIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithFileUploads;
     use WithPagination;
@@ -780,7 +782,7 @@ class ExperimentsIndex extends PlainComponent
             ->orWhere('alias_code', 'like', '%'.$search.'%');
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
         $config = $this->selectedTableConfig();
 
@@ -790,39 +792,36 @@ class ExperimentsIndex extends PlainComponent
 
         $query = $this->buildBaseQueryForSelectedTable();
 
-        $callback = function () use ($query, $headersRow, $rowBuilder) {
-            $file = fopen('php://output', 'w');
-            $headersRowWithSubProject = $headersRow;
-            array_splice($headersRowWithSubProject, 1, 0, 'Sub-project');
-            $headersRowWithSubProject[] = 'Test purpose';
-            fputcsv($file, $headersRowWithSubProject);
+        $headers = $headersRow;
+        array_splice($headers, 1, 0, 'Sub-project');
+        $headers[] = 'Test purpose';
 
-            $query->chunk(200, function ($experiments) use ($file, $rowBuilder) {
-                foreach ($experiments as $experiment) {
-                    if (is_callable($rowBuilder)) {
-                        $rows = $rowBuilder($experiment);
-                        $subProjectCode = data_get($experiment, 'subProjectAssignment.subProject.code') ?? 'N/A';
-                        $purposeLabel = $experiment->purpose?->label() ?? 'N/A';
+        $rows = [];
+        $query->chunk(200, function ($experiments) use (&$rows, $rowBuilder) {
+            foreach ($experiments as $experiment) {
+                if (is_callable($rowBuilder)) {
+                    $built = $rowBuilder($experiment);
+                    $subProjectCode = data_get($experiment, 'subProjectAssignment.subProject.code') ?? 'N/A';
+                    $purposeLabel = $experiment->purpose?->label() ?? 'N/A';
 
-                        if (is_array($rows) && isset($rows[0]) && is_array($rows[0])) {
-                            foreach ($rows as $row) {
-                                array_splice($row, 1, 0, $subProjectCode);
-                                $row[] = $purposeLabel;
-                                fputcsv($file, $row);
-                            }
-                        } else {
-                            array_splice($rows, 1, 0, $subProjectCode);
-                            $rows[] = $purposeLabel;
-                            fputcsv($file, $rows);
+                    if (is_array($built) && isset($built[0]) && is_array($built[0])) {
+                        foreach ($built as $row) {
+                            array_splice($row, 1, 0, $subProjectCode);
+                            $row[] = $purposeLabel;
+                            $rows[] = $row;
                         }
+                    } else {
+                        array_splice($built, 1, 0, $subProjectCode);
+                        $built[] = $purposeLabel;
+                        $rows[] = $built;
                     }
                 }
-            });
+            }
+        });
 
-            fclose($file);
-        };
+        $basename = preg_replace('/\.csv$/', '', (string) $fileName);
 
-        return response()->streamDownload($callback, $fileName);
+        return $this->exportTable($basename, $headers, $rows, $format);
     }
 
     public function uploadPhoto($experimentId)

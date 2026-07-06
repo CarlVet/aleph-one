@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Models\AnimalSamples;
 use App\Models\Cultures;
@@ -26,6 +27,7 @@ use Livewire\WithPagination;
 
 class TubesList extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithFileUploads;
     use WithPagination;
@@ -1960,7 +1962,7 @@ class TubesList extends PlainComponent
         return $html;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
         $config = $this->selectedTableConfig();
         $fileName = (string) ($config['fileName'] ?? 'tubes.csv');
@@ -2060,199 +2062,187 @@ class TubesList extends PlainComponent
 
         $tubes = $query->get();
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
-
         $selectedTable = $this->selectedTable;
         $poolDerivedType = $this->poolDerivedSamplesType();
         $isPool = $this->isPoolTable();
 
         $extraColumns = (array) ($this->selectedTableConfig()['extraColumns'] ?? []);
 
-        $callback = function () use ($tubes, $isPool, $poolDerivedType, $extraColumns) {
-            $file = fopen('php://output', 'w');
-            if ($isPool) {
-                fputcsv($file, [
-                    'Tube code',
-                    'Alias code',
-                    'Sub-project',
-                    'Preservant',
-                    'Pool code',
-                    'Nr pooled',
-                    'Date pooled',
-                    'Pool content type',
-                    'Pool content code',
-                    'Pool content sampling site',
-                    'Pool content date collected',
-                    'Pool content details',
-                    'Pooled at',
-                    'Pooled by',
-                ]);
-            } else {
-                $headers = [
-                    'Tube code',
-                    'Alias code',
-                    'Content type',
-                    'Content code',
-                    'Sub-project',
+        if ($isPool) {
+            $headers = [
+                'Tube code',
+                'Alias code',
+                'Sub-project',
+                'Preservant',
+                'Pool code',
+                'Nr pooled',
+                'Date pooled',
+                'Pool content type',
+                'Pool content code',
+                'Pool content sampling site',
+                'Pool content date collected',
+                'Pool content details',
+                'Pooled at',
+                'Pooled by',
+            ];
+        } else {
+            $headers = [
+                'Tube code',
+                'Alias code',
+                'Content type',
+                'Content code',
+                'Sub-project',
+            ];
+
+            foreach ($extraColumns as $col) {
+                $headers[] = (string) ($col['label'] ?? 'Extra');
+            }
+
+            $headers = array_merge($headers, [
+                'Tube type',
+                'Purpose',
+                'Preservant',
+                'Amount',
+                'Amount unit',
+                'Date processed',
+                'Project',
+            ]);
+        }
+
+        $rows = [];
+        foreach ($tubes as $tube) {
+            if (! $isPool) {
+                $contentType = match ($tube->tubes_content_type) {
+                    HumanSamples::class => 'Human Sample',
+                    AnimalSamples::class => 'Animal Sample',
+                    EnvironmentSamples::class => 'Environment Sample',
+                    ParasiteSamples::class => 'Parasite Sample',
+                    Cultures::class => 'Culture',
+                    Pools::class => 'Pool',
+                    NucleicAcids::class => 'Nucleic Acid',
+                    default => 'Unknown',
+                };
+
+                $row = [
+                    $tube->code,
+                    $tube->alias_code ?? 'N/A',
+                    $contentType,
+                    data_get($tube, 'tubes_content.code') ?? 'N/A',
+                    data_get($tube, 'subProjectAssignment.subProject.code') ?? 'N/A',
                 ];
 
                 foreach ($extraColumns as $col) {
-                    $headers[] = (string) ($col['label'] ?? 'Extra');
-                }
+                    if (! empty($col['personPath'])) {
+                        $p = data_get($tube, (string) $col['personPath']);
+                        $row[] = $p ? trim((string) ($p->title ?? '').' '.(string) ($p->first_name ?? '').' '.(string) ($p->last_name ?? '')) : 'N/A';
 
-                $headers = array_merge($headers, [
-                    'Tube type',
-                    'Purpose',
-                    'Preservant',
-                    'Amount',
-                    'Amount unit',
-                    'Date processed',
-                    'Project',
-                ]);
-
-                fputcsv($file, $headers);
-            }
-
-            foreach ($tubes as $tube) {
-                if (! $isPool) {
-                    $contentType = match ($tube->tubes_content_type) {
-                        HumanSamples::class => 'Human Sample',
-                        AnimalSamples::class => 'Animal Sample',
-                        EnvironmentSamples::class => 'Environment Sample',
-                        ParasiteSamples::class => 'Parasite Sample',
-                        Cultures::class => 'Culture',
-                        Pools::class => 'Pool',
-                        NucleicAcids::class => 'Nucleic Acid',
-                        default => 'Unknown',
-                    };
-
-                    $row = [
-                        $tube->code,
-                        $tube->alias_code ?? 'N/A',
-                        $contentType,
-                        data_get($tube, 'tubes_content.code') ?? 'N/A',
-                        data_get($tube, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    ];
-
-                    foreach ($extraColumns as $col) {
-                        if (! empty($col['personPath'])) {
-                            $p = data_get($tube, (string) $col['personPath']);
-                            $row[] = $p ? trim((string) ($p->title ?? '').' '.(string) ($p->first_name ?? '').' '.(string) ($p->last_name ?? '')) : 'N/A';
-
-                            continue;
-                        }
-
-                        $raw = isset($col['value'])
-                            ? call_user_func($col['value'], $tube)
-                            : data_get($tube, $col['valuePath'] ?? '');
-
-                        $raw = $raw === null || $raw === '' ? 'N/A' : $raw;
-                        $row[] = is_string($raw) ? trim(strip_tags($raw)) : (string) $raw;
+                        continue;
                     }
 
-                    $row = array_merge($row, [
-                        $tube->tube_type ?? 'N/A',
-                        $tube->purpose ?? 'N/A',
-                        $tube->preservant ?? 'N/A',
-                        $tube->amount ?? 'N/A',
-                        $tube->amount_unit ?? 'N/A',
-                        $tube->date_processed ? $tube->date_processed->format('Y-m-d') : 'N/A',
-                        $tube->projects?->code ?? 'N/A',
-                    ]);
+                    $raw = isset($col['value'])
+                        ? call_user_func($col['value'], $tube)
+                        : data_get($tube, $col['valuePath'] ?? '');
 
-                    fputcsv($file, $row);
-
-                    continue;
+                    $raw = $raw === null || $raw === '' ? 'N/A' : $raw;
+                    $row[] = is_string($raw) ? trim(strip_tags($raw)) : (string) $raw;
                 }
 
-                /** @var Pools|null $pool */
-                $pool = data_get($tube, 'tubes_content');
-                $contents = collect(data_get($pool, 'pool_contents') ?? [])
-                    ->filter(fn ($pc) => data_get($pc, 'samples') !== null)
-                    ->when($poolDerivedType, fn ($c) => $c->filter(fn ($pc) => (string) data_get($pc, 'samples_type') === $poolDerivedType))
-                    ->values();
+                $row = array_merge($row, [
+                    $tube->tube_type ?? 'N/A',
+                    $tube->purpose ?? 'N/A',
+                    $tube->preservant ?? 'N/A',
+                    $tube->amount ?? 'N/A',
+                    $tube->amount_unit ?? 'N/A',
+                    $tube->date_processed ? $tube->date_processed->format('Y-m-d') : 'N/A',
+                    $tube->projects?->code ?? 'N/A',
+                ]);
 
-                if ($contents->isEmpty()) {
-                    fputcsv($file, [
-                        $tube->code,
-                        $tube->alias_code ?? 'N/A',
-                        data_get($tube, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                        $tube->preservant ?? 'N/A',
-                        data_get($pool, 'code') ?? 'N/A',
-                        data_get($pool, 'nr_pooled') ?? 'N/A',
-                        $this->dateYmd(data_get($pool, 'date_pooled')),
-                        'N/A',
-                        'N/A',
-                        'N/A',
-                        'N/A',
-                        'N/A',
-                        data_get($pool, 'laboratories.name') ?? 'N/A',
-                        trim((data_get($pool, 'people.first_name') ?? '').' '.(data_get($pool, 'people.last_name') ?? '')) ?: 'N/A',
-                    ]);
+                $rows[] = $row;
 
-                    continue;
-                }
-
-                foreach ($contents as $pc) {
-                    $samplesType = (string) (data_get($pc, 'samples_type') ?? '');
-                    $typeLabel = $samplesType ? str_replace('App\\Models\\', '', $samplesType) : 'N/A';
-                    $sample = data_get($pc, 'samples');
-                    $sampleCode = (string) (data_get($sample, 'code') ?? 'N/A');
-
-                    $site = match ($samplesType) {
-                        HumanSamples::class,
-                        AnimalSamples::class,
-                        EnvironmentSamples::class => (string) (data_get($sample, 'sampling_sites.name') ?? 'N/A'),
-                        ParasiteSamples::class => (string) (data_get($sample, 'parasites.parasites_origin.sampling_sites.name') ?? 'N/A'),
-                        default => (string) (data_get($sample, 'sampling_sites.name') ?? 'N/A'),
-                    };
-
-                    $date = match ($samplesType) {
-                        ParasiteSamples::class => $this->dateYmd(data_get($sample, 'parasites.parasites_origin.date_collected') ?? data_get($sample, 'date_collected')),
-                        default => $this->dateYmd(data_get($sample, 'date_collected')),
-                    };
-
-                    $details = match ($samplesType) {
-                        HumanSamples::class => 'Human: '.((string) (data_get($sample, 'humans.code') ?? 'N/A')).' • '.((string) (data_get($sample, 'sample_types.name') ?? 'N/A')),
-                        AnimalSamples::class => 'Animal: '.((string) (data_get($sample, 'animals.code') ?? 'N/A')).' • '.$this->animalSpeciesLabel(data_get($sample, 'animals.animal_species')),
-                        EnvironmentSamples::class => 'Environment: '.((string) (data_get($sample, 'environment_sample_types.name') ?? 'N/A')),
-                        ParasiteSamples::class => 'Parasite: '.((string) (data_get($sample, 'parasites.parasite_species.name_scientific') ?? 'N/A'))
-                            .' • '.((string) (data_get($sample, 'parasites.sex') ?? 'N/A'))
-                            .' • '.((string) (data_get($sample, 'parasites.stage') ?? 'N/A')),
-                        NucleicAcids::class => 'Nucleic: '.((string) (data_get($sample, 'type') ?? 'N/A')),
-                        Cultures::class => 'Culture: '.((string) (data_get($sample, 'type') ?? 'N/A')),
-                        default => 'N/A',
-                    };
-
-                    fputcsv($file, [
-                        $tube->code,
-                        $tube->alias_code ?? 'N/A',
-                        data_get($tube, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                        $tube->preservant ?? 'N/A',
-                        data_get($pool, 'code') ?? 'N/A',
-                        data_get($pool, 'nr_pooled') ?? 'N/A',
-                        $this->dateYmd(data_get($pool, 'date_pooled')),
-                        $typeLabel,
-                        $sampleCode,
-                        $site,
-                        $date,
-                        $details,
-                        data_get($pool, 'laboratories.name') ?? 'N/A',
-                        trim((data_get($pool, 'people.first_name') ?? '').' '.(data_get($pool, 'people.last_name') ?? '')) ?: 'N/A',
-                    ]);
-                }
+                continue;
             }
 
-            fclose($file);
-        };
+            /** @var Pools|null $pool */
+            $pool = data_get($tube, 'tubes_content');
+            $contents = collect(data_get($pool, 'pool_contents') ?? [])
+                ->filter(fn ($pc) => data_get($pc, 'samples') !== null)
+                ->when($poolDerivedType, fn ($c) => $c->filter(fn ($pc) => (string) data_get($pc, 'samples_type') === $poolDerivedType))
+                ->values();
 
-        return response()->stream($callback, 200, $headers);
+            if ($contents->isEmpty()) {
+                $rows[] = [
+                    $tube->code,
+                    $tube->alias_code ?? 'N/A',
+                    data_get($tube, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                    $tube->preservant ?? 'N/A',
+                    data_get($pool, 'code') ?? 'N/A',
+                    data_get($pool, 'nr_pooled') ?? 'N/A',
+                    $this->dateYmd(data_get($pool, 'date_pooled')),
+                    'N/A',
+                    'N/A',
+                    'N/A',
+                    'N/A',
+                    'N/A',
+                    data_get($pool, 'laboratories.name') ?? 'N/A',
+                    trim((data_get($pool, 'people.first_name') ?? '').' '.(data_get($pool, 'people.last_name') ?? '')) ?: 'N/A',
+                ];
+
+                continue;
+            }
+
+            foreach ($contents as $pc) {
+                $samplesType = (string) (data_get($pc, 'samples_type') ?? '');
+                $typeLabel = $samplesType ? str_replace('App\\Models\\', '', $samplesType) : 'N/A';
+                $sample = data_get($pc, 'samples');
+                $sampleCode = (string) (data_get($sample, 'code') ?? 'N/A');
+
+                $site = match ($samplesType) {
+                    HumanSamples::class,
+                    AnimalSamples::class,
+                    EnvironmentSamples::class => (string) (data_get($sample, 'sampling_sites.name') ?? 'N/A'),
+                    ParasiteSamples::class => (string) (data_get($sample, 'parasites.parasites_origin.sampling_sites.name') ?? 'N/A'),
+                    default => (string) (data_get($sample, 'sampling_sites.name') ?? 'N/A'),
+                };
+
+                $date = match ($samplesType) {
+                    ParasiteSamples::class => $this->dateYmd(data_get($sample, 'parasites.parasites_origin.date_collected') ?? data_get($sample, 'date_collected')),
+                    default => $this->dateYmd(data_get($sample, 'date_collected')),
+                };
+
+                $details = match ($samplesType) {
+                    HumanSamples::class => 'Human: '.((string) (data_get($sample, 'humans.code') ?? 'N/A')).' • '.((string) (data_get($sample, 'sample_types.name') ?? 'N/A')),
+                    AnimalSamples::class => 'Animal: '.((string) (data_get($sample, 'animals.code') ?? 'N/A')).' • '.$this->animalSpeciesLabel(data_get($sample, 'animals.animal_species')),
+                    EnvironmentSamples::class => 'Environment: '.((string) (data_get($sample, 'environment_sample_types.name') ?? 'N/A')),
+                    ParasiteSamples::class => 'Parasite: '.((string) (data_get($sample, 'parasites.parasite_species.name_scientific') ?? 'N/A'))
+                        .' • '.((string) (data_get($sample, 'parasites.sex') ?? 'N/A'))
+                        .' • '.((string) (data_get($sample, 'parasites.stage') ?? 'N/A')),
+                    NucleicAcids::class => 'Nucleic: '.((string) (data_get($sample, 'type') ?? 'N/A')),
+                    Cultures::class => 'Culture: '.((string) (data_get($sample, 'type') ?? 'N/A')),
+                    default => 'N/A',
+                };
+
+                $rows[] = [
+                    $tube->code,
+                    $tube->alias_code ?? 'N/A',
+                    data_get($tube, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                    $tube->preservant ?? 'N/A',
+                    data_get($pool, 'code') ?? 'N/A',
+                    data_get($pool, 'nr_pooled') ?? 'N/A',
+                    $this->dateYmd(data_get($pool, 'date_pooled')),
+                    $typeLabel,
+                    $sampleCode,
+                    $site,
+                    $date,
+                    $details,
+                    data_get($pool, 'laboratories.name') ?? 'N/A',
+                    trim((data_get($pool, 'people.first_name') ?? '').' '.(data_get($pool, 'people.last_name') ?? '')) ?: 'N/A',
+                ];
+            }
+        }
+
+        $basename = preg_replace('/\.csv$/', '', $fileName);
+
+        return $this->exportTable($basename, $headers, $rows, $format);
     }
 
     public function render()

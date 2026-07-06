@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\ParasiteSamplesForm;
 use App\Models\AnimalSamples;
@@ -29,6 +30,7 @@ use Livewire\WithPagination;
 
 class ParasiteSamplesIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithFileUploads;
     use WithPagination;
@@ -851,10 +853,9 @@ class ParasiteSamplesIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
         $config = $this->selectedTableConfig();
-        $fileName = $config['csvFile'];
         $selectedTable = $this->selectedTable;
 
         $query = $this->buildBaseQueryForSelectedTable();
@@ -863,110 +864,97 @@ class ParasiteSamplesIndex extends PlainComponent
         $parasite_samples = $query->get();
 
         $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
+            'Sample code',
+            'Sub-project',
+            $config['originCodeHeader'],
         ];
+        if ($config['includeOriginType']) {
+            $headers[] = 'Parasite origin type';
+        }
+        if ($selectedTable === 'parasite_animal_table') {
+            $headers[] = 'Animal species';
+            $headers[] = 'Sampling site';
+            $headers[] = 'Collection date';
+        }
+        if ($selectedTable === 'parasite_human_table') {
+            $headers[] = 'Patient code';
+            $headers[] = 'Collection date';
+            $headers[] = 'Sampling site';
+        }
+        if ($selectedTable === 'parasite_environment_table') {
+            $headers[] = 'Collection date';
+            $headers[] = 'Sampling site';
+        }
+        $headers = array_merge($headers, [
+            'Parasite species',
+            'Sex',
+            'Stage',
+            'Repletion state',
+            'Sample type',
+            'Date identified',
+            'Date processed',
+            'Identified by',
+            'Processed by',
+        ]);
 
-        $callback = function () use ($parasite_samples, $config, $selectedTable) {
-            $file = fopen('php://output', 'w');
-            $header = [
-                'Sample code',
-                'Sub-project',
-                $config['originCodeHeader'],
+        $rows = $parasite_samples->map(function ($sample) use ($config, $selectedTable) {
+            $row = [
+                $sample->code,
+                data_get($sample, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                $sample->parasites->parasites_origin->code,
             ];
             if ($config['includeOriginType']) {
-                $header[] = 'Parasite origin type';
+                $row[] = match ($sample->parasites->parasites_origin_type) {
+                    'App\Models\AnimalSamples' => 'Animal Sample',
+                    'App\Models\HumanSamples' => 'Human Sample',
+                    'App\Models\EnvironmentSamples' => 'Environmental Sample',
+                    default => $sample->parasites->parasites_origin_type,
+                };
             }
             if ($selectedTable === 'parasite_animal_table') {
-                $header[] = 'Animal species';
-                $header[] = 'Sampling site';
-                $header[] = 'Collection date';
+                $species = $sample->parasites?->parasites_origin?->animals?->animal_species;
+                $common = $species?->name_common ?? $species?->name ?? null;
+                $scientific = $species?->name_scientific ?? null;
+
+                $value = $common ?: 'N/A';
+                if ($scientific) {
+                    $value .= ' ('.$scientific.')';
+                }
+
+                $row[] = $value;
+
+                $row[] = $sample->parasites?->parasites_origin?->sampling_sites?->name ?? 'N/A';
+
+                $dateCollected = $sample->parasites?->parasites_origin?->date_collected;
+                $row[] = $dateCollected ? $dateCollected->format('Y-m-d') : 'N/A';
             }
             if ($selectedTable === 'parasite_human_table') {
-                $header[] = 'Patient code';
-                $header[] = 'Collection date';
-                $header[] = 'Sampling site';
+                $row[] = $sample->parasites?->parasites_origin?->humans?->code ?? 'N/A';
+                $dateCollected = $sample->parasites?->parasites_origin?->date_collected;
+                $row[] = $dateCollected ? $dateCollected->format('Y-m-d') : 'N/A';
+                $row[] = $sample->parasites?->parasites_origin?->sampling_sites?->name ?? 'N/A';
             }
             if ($selectedTable === 'parasite_environment_table') {
-                $header[] = 'Collection date';
-                $header[] = 'Sampling site';
+                $dateCollected = $sample->parasites?->parasites_origin?->date_collected;
+                $row[] = $dateCollected ? $dateCollected->format('Y-m-d') : 'N/A';
+                $row[] = $sample->parasites?->parasites_origin?->sampling_sites?->name ?? 'N/A';
             }
-            $header = array_merge($header, [
-                'Parasite species',
-                'Sex',
-                'Stage',
-                'Repletion state',
-                'Sample type',
-                'Date identified',
-                'Date processed',
-                'Identified by',
-                'Processed by',
+            $row = array_merge($row, [
+                $sample->parasites->parasite_species->name_scientific,
+                $sample->parasites->sex,
+                $sample->parasites->stage,
+                $sample->parasites->state,
+                $sample->parasite_sample_types->name,
+                $sample->parasites->date_identified?->format('Y-m-d') ?? 'N/A',
+                $sample->date_processed?->format('Y-m-d') ?? 'N/A',
+                trim(($sample->parasites->people->title ?? '').' '.($sample->parasites->people->first_name ?? '').' '.($sample->parasites->people->last_name ?? '')) ?: 'N/A',
+                trim(($sample->people->title ?? '').' '.($sample->people->first_name ?? '').' '.($sample->people->last_name ?? '')) ?: 'N/A',
             ]);
-            fputcsv($file, $header);
 
-            foreach ($parasite_samples as $sample) {
-                $row = [
-                    $sample->code,
-                    data_get($sample, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    $sample->parasites->parasites_origin->code,
-                ];
-                if ($config['includeOriginType']) {
-                    $row[] = match ($sample->parasites->parasites_origin_type) {
-                        'App\Models\AnimalSamples' => 'Animal Sample',
-                        'App\Models\HumanSamples' => 'Human Sample',
-                        'App\Models\EnvironmentSamples' => 'Environmental Sample',
-                        default => $sample->parasites->parasites_origin_type,
-                    };
-                }
-                if ($selectedTable === 'parasite_animal_table') {
-                    $species = $sample->parasites?->parasites_origin?->animals?->animal_species;
-                    $common = $species?->name_common ?? $species?->name ?? null;
-                    $scientific = $species?->name_scientific ?? null;
+            return $row;
+        });
 
-                    $value = $common ?: 'N/A';
-                    if ($scientific) {
-                        $value .= ' ('.$scientific.')';
-                    }
-
-                    $row[] = $value;
-
-                    $row[] = $sample->parasites?->parasites_origin?->sampling_sites?->name ?? 'N/A';
-
-                    $dateCollected = $sample->parasites?->parasites_origin?->date_collected;
-                    $row[] = $dateCollected ? $dateCollected->format('Y-m-d') : 'N/A';
-                }
-                if ($selectedTable === 'parasite_human_table') {
-                    $row[] = $sample->parasites?->parasites_origin?->humans?->code ?? 'N/A';
-                    $dateCollected = $sample->parasites?->parasites_origin?->date_collected;
-                    $row[] = $dateCollected ? $dateCollected->format('Y-m-d') : 'N/A';
-                    $row[] = $sample->parasites?->parasites_origin?->sampling_sites?->name ?? 'N/A';
-                }
-                if ($selectedTable === 'parasite_environment_table') {
-                    $dateCollected = $sample->parasites?->parasites_origin?->date_collected;
-                    $row[] = $dateCollected ? $dateCollected->format('Y-m-d') : 'N/A';
-                    $row[] = $sample->parasites?->parasites_origin?->sampling_sites?->name ?? 'N/A';
-                }
-                $row = array_merge($row, [
-                    $sample->parasites->parasite_species->name_scientific,
-                    $sample->parasites->sex,
-                    $sample->parasites->stage,
-                    $sample->parasites->state,
-                    $sample->parasite_sample_types->name,
-                    $sample->parasites->date_identified?->format('Y-m-d') ?? 'N/A',
-                    $sample->date_processed?->format('Y-m-d') ?? 'N/A',
-                    trim(($sample->parasites->people->title ?? '').' '.($sample->parasites->people->first_name ?? '').' '.($sample->parasites->people->last_name ?? '')) ?: 'N/A',
-                    trim(($sample->people->title ?? '').' '.($sample->people->first_name ?? '').' '.($sample->people->last_name ?? '')) ?: 'N/A',
-                ]);
-                fputcsv($file, $row);
-            }
-
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable(Str::replaceLast('.csv', '', $config['csvFile']), $headers, $rows, $format);
     }
 
     public function uploadPhoto($sampleId)

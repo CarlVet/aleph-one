@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\CulturesForm;
 use App\Models\AnimalSamples;
@@ -23,11 +24,13 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 
 class CulturesIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithFileUploads;
     use WithPagination;
@@ -1258,7 +1261,7 @@ class CulturesIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
         $fileName = match ($this->selectedTable) {
             'culture_human_table' => 'human_cultures.csv',
@@ -1327,173 +1330,159 @@ class CulturesIndex extends PlainComponent
 
         $cultures = $query->get();
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
-
         $selectedTable = $this->selectedTable;
         $poolDerivedType = $this->poolDerivedSamplesType();
         $isPoolTable = $this->isPoolTable();
 
-        $callback = function () use ($cultures, $selectedTable, $isPoolTable, $poolDerivedType) {
-            $file = fopen('php://output', 'w');
-            $header = ['Culture code', 'Parent culture code', 'Content Type', 'Content code', 'Sub-project'];
+        $headers = ['Culture code', 'Parent culture code', 'Content Type', 'Content code', 'Sub-project'];
+        if ($selectedTable === 'culture_human_table') {
+            $headers = array_merge($headers, ['Human code', 'Sample type', 'Sampling site']);
+        }
+        if ($selectedTable === 'culture_animal_table') {
+            $headers = array_merge($headers, ['Animal code', 'Species', 'Sampling site']);
+        }
+        if ($selectedTable === 'culture_environment_table') {
+            $headers = array_merge($headers, ['Environment type', 'Sampling site']);
+        }
+        if (in_array($selectedTable, ['culture_parasite_table', 'culture_parasite_human_table', 'culture_parasite_animal_table', 'culture_parasite_environment_table'], true)) {
+            $headers = array_merge($headers, ['Parasite species', 'Origin sample code', 'Origin sampling site']);
+        }
+        if ($isPoolTable) {
+            // Disaggregated pool export: one row per pool content item
+            $headers = array_merge($headers, [
+                'Pool content type',
+                'Pool content code',
+                'Pool content sampling site',
+                'Pool content details',
+            ]);
+        }
+        $headers = array_merge($headers, ['Type', 'Medium', 'Athmosphere', 'Incubation Temperature', 'Date cultured', 'Cultured by', 'Cultured at']);
+
+        $rows = $cultures->flatMap(function ($culture) use ($selectedTable, $isPoolTable, $poolDerivedType) {
+            $contentType = match ($culture->cultures_content_type) {
+                'App\Models\HumanSamples' => 'Human Sample',
+                'App\Models\AnimalSamples' => 'Animal Sample',
+                'App\Models\EnvironmentSamples' => 'Environment Sample',
+                'App\Models\ParasiteSamples' => 'Parasite Sample',
+                'App\Models\Pools' => 'Pools',
+            };
+
+            $row = [
+                $culture->code,
+                $culture->parent?->code ?? 'Primary culture',
+                $contentType,
+                data_get($culture, 'cultures_content.code') ?? 'N/A',
+                data_get($culture, 'subProjectAssignment.subProject.code') ?? 'N/A',
+            ];
+
             if ($selectedTable === 'culture_human_table') {
-                $header = array_merge($header, ['Human code', 'Sample type', 'Sampling site']);
+                $row[] = data_get($culture, 'cultures_content.humans.code') ?? 'N/A';
+                $row[] = data_get($culture, 'cultures_content.sample_types.name') ?? 'N/A';
+                $row[] = data_get($culture, 'cultures_content.sampling_sites.name') ?? 'N/A';
             }
             if ($selectedTable === 'culture_animal_table') {
-                $header = array_merge($header, ['Animal code', 'Species', 'Sampling site']);
+                $row[] = data_get($culture, 'cultures_content.animals.code') ?? 'N/A';
+                $common = (string) (data_get($culture, 'cultures_content.animals.animal_species.name_common') ?? '');
+                $scientific = (string) (data_get($culture, 'cultures_content.animals.animal_species.name_scientific') ?? '');
+                $row[] = $common && $scientific ? ($common.' ('.$scientific.')') : (trim($common) ?: (trim($scientific) ?: 'N/A'));
+                $row[] = data_get($culture, 'cultures_content.sampling_sites.name') ?? 'N/A';
             }
             if ($selectedTable === 'culture_environment_table') {
-                $header = array_merge($header, ['Environment type', 'Sampling site']);
+                $row[] = data_get($culture, 'cultures_content.environment_sample_types.name') ?? 'N/A';
+                $row[] = data_get($culture, 'cultures_content.sampling_sites.name') ?? 'N/A';
             }
             if (in_array($selectedTable, ['culture_parasite_table', 'culture_parasite_human_table', 'culture_parasite_animal_table', 'culture_parasite_environment_table'], true)) {
-                $header = array_merge($header, ['Parasite species', 'Origin sample code', 'Origin sampling site']);
+                $row[] = data_get($culture, 'cultures_content.parasites.parasite_species.name_scientific') ?? 'N/A';
+                $row[] = data_get($culture, 'cultures_content.parasites.parasites_origin.code') ?? 'N/A';
+                $row[] = data_get($culture, 'cultures_content.parasites.parasites_origin.sampling_sites.name') ?? 'N/A';
             }
-            if ($isPoolTable) {
-                // Disaggregated pool export: one row per pool content item
-                $header = array_merge($header, [
-                    'Pool content type',
-                    'Pool content code',
-                    'Pool content sampling site',
-                    'Pool content details',
+            if (! $isPoolTable) {
+                $row = array_merge($row, [
+                    $culture->type ?? 'N/A',
+                    $culture->medium ?? 'N/A',
+                    $culture->athmosphere ?? 'N/A',
+                    $culture->incubation_temp ?? 'N/A',
+                    $culture->date_cultured ?? 'N/A',
+                    trim(($culture->people?->first_name ?? '').' '.($culture->people?->last_name ?? '')) ?: 'N/A',
+                    $culture->laboratories?->name ?? 'N/A',
                 ]);
-            }
-            $header = array_merge($header, ['Type', 'Medium', 'Athmosphere', 'Incubation Temperature', 'Date cultured', 'Cultured by', 'Cultured at']);
-            fputcsv($file, $header);
 
-            foreach ($cultures as $culture) {
-                $contentType = match ($culture->cultures_content_type) {
-                    'App\Models\HumanSamples' => 'Human Sample',
-                    'App\Models\AnimalSamples' => 'Animal Sample',
-                    'App\Models\EnvironmentSamples' => 'Environment Sample',
-                    'App\Models\ParasiteSamples' => 'Parasite Sample',
-                    'App\Models\Pools' => 'Pools',
+                return [$row];
+            }
+
+            $poolContents = collect(data_get($culture, 'cultures_content.pool_contents') ?? [])
+                ->filter(fn ($pc) => data_get($pc, 'samples') !== null)
+                ->when($poolDerivedType, fn ($c) => $c->filter(fn ($pc) => (string) data_get($pc, 'samples_type') === $poolDerivedType))
+                ->values();
+
+            if ($poolContents->isEmpty()) {
+                $poolRow = array_merge($row, ['N/A', 'N/A', 'N/A', 'N/A']);
+                $poolRow = array_merge($poolRow, [
+                    $culture->type ?? 'N/A',
+                    $culture->medium ?? 'N/A',
+                    $culture->athmosphere ?? 'N/A',
+                    $culture->incubation_temp ?? 'N/A',
+                    $culture->date_cultured ?? 'N/A',
+                    trim(($culture->people?->first_name ?? '').' '.($culture->people?->last_name ?? '')) ?: 'N/A',
+                    $culture->laboratories?->name ?? 'N/A',
+                ]);
+
+                return [$poolRow];
+            }
+
+            $poolRows = [];
+
+            foreach ($poolContents as $pc) {
+                $samplesType = (string) (data_get($pc, 'samples_type') ?? '');
+                $sample = data_get($pc, 'samples');
+                $sampleCode = (string) (data_get($sample, 'code') ?? 'N/A');
+
+                $samplingSite = match ($samplesType) {
+                    HumanSamples::class,
+                    AnimalSamples::class,
+                    EnvironmentSamples::class => (string) (data_get($sample, 'sampling_sites.name') ?? 'N/A'),
+                    ParasiteSamples::class => (string) (data_get($sample, 'parasites.parasites_origin.sampling_sites.name') ?? 'N/A'),
+                    default => 'N/A',
                 };
 
-                $row = [
-                    $culture->code,
-                    $culture->parent?->code ?? 'Primary culture',
-                    $contentType,
-                    data_get($culture, 'cultures_content.code') ?? 'N/A',
-                    data_get($culture, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                ];
+                $details = match ($samplesType) {
+                    HumanSamples::class => 'Human: '.((string) (data_get($sample, 'humans.code') ?? 'N/A')).' • '.((string) (data_get($sample, 'sample_types.name') ?? 'N/A')),
+                    AnimalSamples::class => 'Animal: '.((string) (data_get($sample, 'animals.code') ?? 'N/A')).' • '.((string) (data_get($sample, 'animals.animal_species.name_scientific') ?? 'N/A')),
+                    EnvironmentSamples::class => 'Environment: '.((string) (data_get($sample, 'environment_sample_types.name') ?? 'N/A')),
+                    ParasiteSamples::class => 'Parasite: '.((string) (data_get($sample, 'parasites.parasite_species.name_scientific') ?? 'N/A')).' • origin '.((string) (data_get($sample, 'parasites.parasites_origin.code') ?? 'N/A')),
+                    default => 'N/A',
+                };
 
-                if ($selectedTable === 'culture_human_table') {
-                    $row[] = data_get($culture, 'cultures_content.humans.code') ?? 'N/A';
-                    $row[] = data_get($culture, 'cultures_content.sample_types.name') ?? 'N/A';
-                    $row[] = data_get($culture, 'cultures_content.sampling_sites.name') ?? 'N/A';
-                }
-                if ($selectedTable === 'culture_animal_table') {
-                    $row[] = data_get($culture, 'cultures_content.animals.code') ?? 'N/A';
-                    $common = (string) (data_get($culture, 'cultures_content.animals.animal_species.name_common') ?? '');
-                    $scientific = (string) (data_get($culture, 'cultures_content.animals.animal_species.name_scientific') ?? '');
-                    $row[] = $common && $scientific ? ($common.' ('.$scientific.')') : (trim($common) ?: (trim($scientific) ?: 'N/A'));
-                    $row[] = data_get($culture, 'cultures_content.sampling_sites.name') ?? 'N/A';
-                }
-                if ($selectedTable === 'culture_environment_table') {
-                    $row[] = data_get($culture, 'cultures_content.environment_sample_types.name') ?? 'N/A';
-                    $row[] = data_get($culture, 'cultures_content.sampling_sites.name') ?? 'N/A';
-                }
-                if (in_array($selectedTable, ['culture_parasite_table', 'culture_parasite_human_table', 'culture_parasite_animal_table', 'culture_parasite_environment_table'], true)) {
-                    $row[] = data_get($culture, 'cultures_content.parasites.parasite_species.name_scientific') ?? 'N/A';
-                    $row[] = data_get($culture, 'cultures_content.parasites.parasites_origin.code') ?? 'N/A';
-                    $row[] = data_get($culture, 'cultures_content.parasites.parasites_origin.sampling_sites.name') ?? 'N/A';
-                }
-                if (! $isPoolTable) {
-                    $row = array_merge($row, [
-                        $culture->type ?? 'N/A',
-                        $culture->medium ?? 'N/A',
-                        $culture->athmosphere ?? 'N/A',
-                        $culture->incubation_temp ?? 'N/A',
-                        $culture->date_cultured ?? 'N/A',
-                        trim(($culture->people?->first_name ?? '').' '.($culture->people?->last_name ?? '')) ?: 'N/A',
-                        $culture->laboratories?->name ?? 'N/A',
-                    ]);
+                $poolRow = array_merge($row, [
+                    match (class_basename($samplesType)) {
+                        'HumanSamples' => 'Human sample',
+                        'AnimalSamples' => 'Animal sample',
+                        'EnvironmentSamples' => 'Environment sample',
+                        'ParasiteSamples' => 'Parasite sample',
+                        default => class_basename($samplesType) ?: 'N/A',
+                    },
+                    $sampleCode,
+                    $samplingSite,
+                    $details,
+                ]);
 
-                    fputcsv($file, $row);
+                $poolRow = array_merge($poolRow, [
+                    $culture->type ?? 'N/A',
+                    $culture->medium ?? 'N/A',
+                    $culture->athmosphere ?? 'N/A',
+                    $culture->incubation_temp ?? 'N/A',
+                    $culture->date_cultured ?? 'N/A',
+                    trim(($culture->people?->first_name ?? '').' '.($culture->people?->last_name ?? '')) ?: 'N/A',
+                    $culture->laboratories?->name ?? 'N/A',
+                ]);
 
-                    continue;
-                }
-
-                $poolContents = collect(data_get($culture, 'cultures_content.pool_contents') ?? [])
-                    ->filter(fn ($pc) => data_get($pc, 'samples') !== null)
-                    ->when($poolDerivedType, fn ($c) => $c->filter(fn ($pc) => (string) data_get($pc, 'samples_type') === $poolDerivedType))
-                    ->values();
-
-                if ($poolContents->isEmpty()) {
-                    $poolRow = array_merge($row, ['N/A', 'N/A', 'N/A', 'N/A']);
-                    $poolRow = array_merge($poolRow, [
-                        $culture->type ?? 'N/A',
-                        $culture->medium ?? 'N/A',
-                        $culture->athmosphere ?? 'N/A',
-                        $culture->incubation_temp ?? 'N/A',
-                        $culture->date_cultured ?? 'N/A',
-                        trim(($culture->people?->first_name ?? '').' '.($culture->people?->last_name ?? '')) ?: 'N/A',
-                        $culture->laboratories?->name ?? 'N/A',
-                    ]);
-                    fputcsv($file, $poolRow);
-
-                    continue;
-                }
-
-                foreach ($poolContents as $pc) {
-                    $samplesType = (string) (data_get($pc, 'samples_type') ?? '');
-                    $sample = data_get($pc, 'samples');
-                    $sampleCode = (string) (data_get($sample, 'code') ?? 'N/A');
-
-                    $samplingSite = match ($samplesType) {
-                        HumanSamples::class,
-                        AnimalSamples::class,
-                        EnvironmentSamples::class => (string) (data_get($sample, 'sampling_sites.name') ?? 'N/A'),
-                        ParasiteSamples::class => (string) (data_get($sample, 'parasites.parasites_origin.sampling_sites.name') ?? 'N/A'),
-                        default => 'N/A',
-                    };
-
-                    $details = match ($samplesType) {
-                        HumanSamples::class => 'Human: '.((string) (data_get($sample, 'humans.code') ?? 'N/A')).' • '.((string) (data_get($sample, 'sample_types.name') ?? 'N/A')),
-                        AnimalSamples::class => 'Animal: '.((string) (data_get($sample, 'animals.code') ?? 'N/A')).' • '.((string) (data_get($sample, 'animals.animal_species.name_scientific') ?? 'N/A')),
-                        EnvironmentSamples::class => 'Environment: '.((string) (data_get($sample, 'environment_sample_types.name') ?? 'N/A')),
-                        ParasiteSamples::class => 'Parasite: '.((string) (data_get($sample, 'parasites.parasite_species.name_scientific') ?? 'N/A')).' • origin '.((string) (data_get($sample, 'parasites.parasites_origin.code') ?? 'N/A')),
-                        default => 'N/A',
-                    };
-
-                    $poolRow = array_merge($row, [
-                        match (class_basename($samplesType)) {
-                            'HumanSamples' => 'Human sample',
-                            'AnimalSamples' => 'Animal sample',
-                            'EnvironmentSamples' => 'Environment sample',
-                            'ParasiteSamples' => 'Parasite sample',
-                            default => class_basename($samplesType) ?: 'N/A',
-                        },
-                        $sampleCode,
-                        $samplingSite,
-                        $details,
-                    ]);
-
-                    $poolRow = array_merge($poolRow, [
-                        $culture->type ?? 'N/A',
-                        $culture->medium ?? 'N/A',
-                        $culture->athmosphere ?? 'N/A',
-                        $culture->incubation_temp ?? 'N/A',
-                        $culture->date_cultured ?? 'N/A',
-                        trim(($culture->people?->first_name ?? '').' '.($culture->people?->last_name ?? '')) ?: 'N/A',
-                        $culture->laboratories?->name ?? 'N/A',
-                    ]);
-
-                    fputcsv($file, $poolRow);
-                }
-
+                $poolRows[] = $poolRow;
             }
 
-            fclose($file);
-        };
+            return $poolRows;
+        });
 
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable(Str::replaceLast('.csv', '', $fileName), $headers, $rows, $format);
     }
 
     public function render()

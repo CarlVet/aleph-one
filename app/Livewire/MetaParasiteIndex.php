@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Models\Countries;
 use App\Models\MetaParasite;
@@ -17,6 +18,7 @@ use Livewire\WithPagination;
 
 class MetaParasiteIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -288,10 +290,8 @@ class MetaParasiteIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'meta_parasites.csv';
-
         $query = MetaParasite::with(
             'studies',
             'countries',
@@ -319,41 +319,29 @@ class MetaParasiteIndex extends PlainComponent
 
         $meta_parasites = $query->get();
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
+        $headers = ['Study', 'Parasite Species', 'Location', 'Country', 'Date Sampling', 'Sample Type', 'Pathogen', 'Technique', 'Tested N', 'Positive N', 'Risk Factor', 'Sub-project', 'Scientist'];
 
-        $callback = function () use ($meta_parasites) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, ['Study', 'Parasite Species', 'Location', 'Country', 'Date Sampling', 'Sample Type', 'Pathogen', 'Technique', 'Tested N', 'Positive N', 'Risk Factor', 'Sub-project', 'Scientist']);
+        $rows = $meta_parasites->map(function ($meta) {
+            $riskFactors = $meta->risk_factors->pluck('name')->filter()->unique()->implode(', ');
 
-            foreach ($meta_parasites as $meta) {
-                $riskFactors = $meta->risk_factors->pluck('name')->filter()->unique()->implode(', ');
-                fputcsv($file, [
-                    $meta->studies->ref_key,
-                    $meta->parasite_species->name_scientific,
-                    $meta->location,
-                    $meta->countries->name,
-                    $meta->date_sampling,
-                    $meta->parasite_sample_types->name,
-                    $meta->pathogens->species,
-                    $meta->techniques->name,
-                    $meta->tested_n,
-                    $meta->pos_n,
-                    $riskFactors !== '' ? $riskFactors : 'N/A',
-                    data_get($meta, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    $meta->people->first_name.' '.$meta->people->last_name,
-                ]);
-            }
+            return [
+                $meta->studies->ref_key,
+                $meta->parasite_species->name_scientific,
+                $meta->location,
+                $meta->countries->name,
+                $meta->date_sampling,
+                $meta->parasite_sample_types->name,
+                $meta->pathogens->species,
+                $meta->techniques->name,
+                $meta->tested_n,
+                $meta->pos_n,
+                $riskFactors !== '' ? $riskFactors : 'N/A',
+                data_get($meta, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                $meta->people->first_name.' '.$meta->people->last_name,
+            ];
+        });
 
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable('meta_parasites', $headers, $rows, $format);
     }
 
     public function render()

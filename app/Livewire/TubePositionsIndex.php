@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\TubePositionsForm;
 use App\Models\AnimalSamples;
@@ -23,6 +24,7 @@ use Livewire\WithPagination;
 
 class TubePositionsIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -1451,7 +1453,7 @@ class TubePositionsIndex extends PlainComponent
         return $html;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
         $config = $this->withTubeAliasColumns($this->withStorageColumns($this->selectedTableConfig()));
 
@@ -1467,35 +1469,30 @@ class TubePositionsIndex extends PlainComponent
 
         $query = $this->buildBaseQueryForSelectedTable();
 
-        $callback = function () use ($query, $headers, $rowBuilder) {
-            $file = fopen('php://output', 'w');
-            $headersWithSubProject = $headers;
-            array_splice($headersWithSubProject, 1, 0, 'Sub-project');
-            fputcsv($file, $headersWithSubProject);
+        $exportHeaders = $headers;
+        array_splice($exportHeaders, 1, 0, 'Sub-project');
 
-            $query->chunk(500, function ($positions) use ($file, $rowBuilder) {
-                foreach ($positions as $position) {
-                    $rows = $rowBuilder($position);
-                    $subProjectCode = data_get($position, 'subProjectAssignment.subProject.code') ?? 'N/A';
+        $rows = [];
+        $query->chunk(500, function ($positions) use (&$rows, $rowBuilder) {
+            foreach ($positions as $position) {
+                $built = $rowBuilder($position);
+                $subProjectCode = data_get($position, 'subProjectAssignment.subProject.code') ?? 'N/A';
 
-                    if (is_array($rows) && isset($rows[0]) && is_array($rows[0])) {
-                        foreach ($rows as $row) {
-                            array_splice($row, 1, 0, $subProjectCode);
-                            fputcsv($file, $row);
-                        }
-                    } else {
-                        array_splice($rows, 1, 0, $subProjectCode);
-                        fputcsv($file, $rows);
+                if (is_array($built) && isset($built[0]) && is_array($built[0])) {
+                    foreach ($built as $row) {
+                        array_splice($row, 1, 0, $subProjectCode);
+                        $rows[] = $row;
                     }
+                } else {
+                    array_splice($built, 1, 0, $subProjectCode);
+                    $rows[] = $built;
                 }
-            });
+            }
+        });
 
-            fclose($file);
-        };
+        $basename = preg_replace('/\.csv$/', '', (string) $fileName);
 
-        return response()->streamDownload($callback, $fileName, [
-            'Content-Type' => 'text/csv',
-        ]);
+        return $this->exportTable($basename, $exportHeaders, $rows, $format);
     }
 
     /**

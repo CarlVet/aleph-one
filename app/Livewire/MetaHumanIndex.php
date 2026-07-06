@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Models\Countries;
 use App\Models\MetaHuman;
@@ -16,6 +17,7 @@ use Livewire\WithPagination;
 
 class MetaHumanIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -309,10 +311,8 @@ class MetaHumanIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'meta_humans.csv';
-
         $query = MetaHuman::with(
             'studies',
             'countries',
@@ -341,48 +341,36 @@ class MetaHumanIndex extends PlainComponent
 
         $meta_humans = $query->get();
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
+        $headers = ['Study', 'Sex', 'Age Group', 'Job', 'Habitat', 'Location', 'Country', 'Date Sampling', 'Sample Type', 'Pathogen', 'Technique', 'Tested N', 'Positive N', 'Risk Factor', 'Clinical Signs', 'Lesions', 'Sub-project', 'Scientist'];
 
-        $callback = function () use ($meta_humans) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, ['Study', 'Sex', 'Age Group', 'Job', 'Habitat', 'Location', 'Country', 'Date Sampling', 'Sample Type', 'Pathogen', 'Technique', 'Tested N', 'Positive N', 'Risk Factor', 'Clinical Signs', 'Lesions', 'Sub-project', 'Scientist']);
+        $rows = $meta_humans->map(function ($meta) {
+            $riskFactors = $meta->risk_factors->pluck('name')->filter()->unique()->implode(', ');
+            $clinicalSigns = $meta->clinical_signs->pluck('name')->filter()->unique()->implode(', ');
+            $lesions = $meta->lesions->pluck('name')->filter()->unique()->implode(', ');
 
-            foreach ($meta_humans as $meta) {
-                $riskFactors = $meta->risk_factors->pluck('name')->filter()->unique()->implode(', ');
-                $clinicalSigns = $meta->clinical_signs->pluck('name')->filter()->unique()->implode(', ');
-                $lesions = $meta->lesions->pluck('name')->filter()->unique()->implode(', ');
-                fputcsv($file, [
-                    $meta->studies->ref_key,
-                    $meta->sex,
-                    $meta->age_group,
-                    $meta->job,
-                    $meta->habitat,
-                    $meta->location,
-                    $meta->countries->name,
-                    $meta->date_sampling,
-                    $meta->sample_types->name,
-                    $meta->pathogens->species,
-                    $meta->techniques->name,
-                    $meta->tested_n,
-                    $meta->pos_n,
-                    $riskFactors !== '' ? $riskFactors : 'N/A',
-                    $clinicalSigns !== '' ? $clinicalSigns : 'N/A',
-                    $lesions !== '' ? $lesions : 'N/A',
-                    data_get($meta, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    $meta->people->first_name.' '.$meta->people->last_name,
-                ]);
-            }
+            return [
+                $meta->studies->ref_key,
+                $meta->sex,
+                $meta->age_group,
+                $meta->job,
+                $meta->habitat,
+                $meta->location,
+                $meta->countries->name,
+                $meta->date_sampling,
+                $meta->sample_types->name,
+                $meta->pathogens->species,
+                $meta->techniques->name,
+                $meta->tested_n,
+                $meta->pos_n,
+                $riskFactors !== '' ? $riskFactors : 'N/A',
+                $clinicalSigns !== '' ? $clinicalSigns : 'N/A',
+                $lesions !== '' ? $lesions : 'N/A',
+                data_get($meta, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                $meta->people->first_name.' '.$meta->people->last_name,
+            ];
+        });
 
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable('meta_humans', $headers, $rows, $format);
     }
 
     public function render()

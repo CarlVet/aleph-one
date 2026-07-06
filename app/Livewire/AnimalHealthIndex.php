@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\AnimalHealthForm;
 use App\Models\AnimalHealth;
@@ -12,6 +13,7 @@ use Livewire\WithPagination;
 #[Title('Animal Health Index')]
 class AnimalHealthIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithPagination;
 
@@ -169,10 +171,8 @@ class AnimalHealthIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'animal_health.csv';
-
         $query = AnimalHealth::with([
             'animals',
             'animals.animal_species',
@@ -196,50 +196,35 @@ class AnimalHealthIndex extends PlainComponent
         $query = $this->applyFilters($query);
         $this->applySorting($query, $this->sortMap(), ['created_at', 'desc']);
 
-        $healthRecords = $query->get();
+        $headers = ['Animal Code', 'Species', 'Health Status', 'Check Date', 'Check Type', 'Clinical Signs', 'Lesions', 'Alive', 'Notes'];
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
-
-        $callback = function () use ($healthRecords) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, ['Animal Code', 'Species', 'Health Status', 'Check Date', 'Check Type', 'Clinical Signs', 'Lesions', 'Alive', 'Notes']);
-
-            foreach ($healthRecords as $record) {
-                // Get multiple clinical signs
-                $clinicalSigns = $record->clinical_signs_many->pluck('name')->implode(', ');
-                if (empty($clinicalSigns) && $record->clinical_signs) {
-                    $clinicalSigns = $record->clinical_signs->name;
-                }
-
-                // Get multiple lesions
-                $lesions = $record->lesions_many->pluck('name')->implode(', ');
-                if (empty($lesions) && $record->lesions) {
-                    $lesions = $record->lesions->name;
-                }
-
-                fputcsv($file, [
-                    $record->animals->code ?? 'N/A',
-                    $record->animals->animal_species->name_common ?? 'N/A',
-                    $record->health_status ?? 'N/A',
-                    $record->check_date ?? 'N/A',
-                    $record->check_type ?? 'N/A',
-                    $clinicalSigns ?: 'N/A',
-                    $lesions ?: 'N/A',
-                    $record->alive ? 'Yes' : 'No',
-                    $record->notes ?? 'N/A',
-                ]);
+        $rows = $query->get()->map(function ($record) {
+            // Get multiple clinical signs
+            $clinicalSigns = $record->clinical_signs_many->pluck('name')->implode(', ');
+            if (empty($clinicalSigns) && $record->clinical_signs) {
+                $clinicalSigns = $record->clinical_signs->name;
             }
 
-            fclose($file);
-        };
+            // Get multiple lesions
+            $lesions = $record->lesions_many->pluck('name')->implode(', ');
+            if (empty($lesions) && $record->lesions) {
+                $lesions = $record->lesions->name;
+            }
 
-        return response()->stream($callback, 200, $headers);
+            return [
+                $record->animals->code ?? 'N/A',
+                $record->animals->animal_species->name_common ?? 'N/A',
+                $record->health_status ?? 'N/A',
+                $record->check_date ?? 'N/A',
+                $record->check_type ?? 'N/A',
+                $clinicalSigns ?: 'N/A',
+                $lesions ?: 'N/A',
+                $record->alive ? 'Yes' : 'No',
+                $record->notes ?? 'N/A',
+            ];
+        });
+
+        return $this->exportTable('animal_health', $headers, $rows, $format);
     }
 
     public function render()

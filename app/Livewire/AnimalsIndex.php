@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\AnimalsForm;
 use App\Models\Animals;
@@ -16,6 +17,7 @@ use Livewire\WithPagination;
 #[Title('Animals Index')]
 class AnimalsIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithFileUploads;
     use WithPagination;
@@ -171,10 +173,8 @@ class AnimalsIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'animals.csv';
-
         $query = Animals::with([
             'animal_species',
             'owner',
@@ -184,10 +184,7 @@ class AnimalsIndex extends PlainComponent
         ]);
 
         // Handle guest mode vs project mode
-        if ($this->isGuestMode()) {
-            // In guest mode, show all animals
-            $query = $query;
-        } else {
+        if (! $this->isGuestMode()) {
             // In project mode, show animals from the selected project
             $query->where('projects_id', $this->projectId);
         }
@@ -195,48 +192,33 @@ class AnimalsIndex extends PlainComponent
         $query = $this->applyFilters($query);
         $query = $this->applySorting($query, $this->sortMap(), ['created_at', 'desc']);
 
-        $animals = $query->get();
+        $headers = ['Animal code', 'Field ID', 'Species', 'Sex', 'Age', 'Handler/Owner', 'Location'];
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
-
-        $callback = function () use ($animals) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, ['Animal code', 'Field ID', 'Species', 'Sex', 'Age', 'Handler/Owner', 'Location']);
-
-            foreach ($animals as $animal) {
-                $owner = $animal->owner;
-                $ownerLabel = 'N/A';
-                if ($owner instanceof Humans) {
-                    $ownerLabel = trim((string) ($owner->title ?? '').' '.(string) ($owner->first_name ?? '').' '.(string) ($owner->last_name ?? '')) ?: 'N/A';
-                } elseif ($owner instanceof Organizations) {
-                    $ownerLabel = (string) ($owner->name ?? 'N/A');
-                }
-
-                $locationLabel = (string) (data_get($animal, 'latest_movement.destination_sampling_site.name')
-                    ?: data_get($animal, 'latest_movement.source_sampling_site.name')
-                    ?: 'N/A');
-
-                fputcsv($file, [
-                    $animal->code,
-                    $animal->field_label,
-                    trim((string) data_get($animal, 'animal_species.name_common', '').' ('.(string) data_get($animal, 'animal_species.name_scientific', '').')'),
-                    $animal->sex,
-                    $animal->age,
-                    $ownerLabel,
-                    $locationLabel,
-                ]);
+        $rows = $query->get()->map(function ($animal) {
+            $owner = $animal->owner;
+            $ownerLabel = 'N/A';
+            if ($owner instanceof Humans) {
+                $ownerLabel = trim((string) ($owner->title ?? '').' '.(string) ($owner->first_name ?? '').' '.(string) ($owner->last_name ?? '')) ?: 'N/A';
+            } elseif ($owner instanceof Organizations) {
+                $ownerLabel = (string) ($owner->name ?? 'N/A');
             }
 
-            fclose($file);
-        };
+            $locationLabel = (string) (data_get($animal, 'latest_movement.destination_sampling_site.name')
+                ?: data_get($animal, 'latest_movement.source_sampling_site.name')
+                ?: 'N/A');
 
-        return response()->stream($callback, 200, $headers);
+            return [
+                $animal->code,
+                $animal->field_label,
+                trim((string) data_get($animal, 'animal_species.name_common', '').' ('.(string) data_get($animal, 'animal_species.name_scientific', '').')'),
+                $animal->sex,
+                $animal->age,
+                $ownerLabel,
+                $locationLabel,
+            ];
+        });
+
+        return $this->exportTable('animals', $headers, $rows, $format);
     }
 
     public function render()

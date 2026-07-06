@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\AnimalSamplesForm;
 use App\Models\AnimalSamples;
@@ -20,6 +21,7 @@ use Livewire\WithPagination;
 #[Title('Animal Samples Index')]
 class AnimalSamplesIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithFileUploads;
     use WithPagination;
@@ -452,10 +454,8 @@ class AnimalSamplesIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'animal_samples.csv';
-
         $query = AnimalSamples::with([
             'animals',
             'animals.animal_species',
@@ -493,42 +493,27 @@ class AnimalSamplesIndex extends PlainComponent
         $query = $this->applyFilters($query);
         $query = $this->applySorting($query, $this->sortMap(), ['created_at', 'desc']);
 
-        $samples = $query->get();
+        $headers = ['Sample code', 'Sub-project', 'Animal code', 'Field ID', 'Species', 'Sex', 'Age', 'Sample Type', 'Date Collected', 'Sampling site', 'Latitude', 'Longitude', 'Collector'];
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
+        $rows = $query->get()->map(function ($sample) {
+            return [
+                $sample->code,
+                data_get($sample, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                $sample->animals->code,
+                $sample->animals->field_label,
+                $sample->animals->animal_species->name_common.' ('.$sample->animals->animal_species->name_scientific.')',
+                $sample->animals->sex,
+                $sample->animals->age,
+                $sample->sample_types->name,
+                $sample->date_collected,
+                $sample->sampling_sites->name,
+                $sample->latitude,
+                $sample->longitude,
+                $sample->people->title.' '.$sample->people->first_name.' '.$sample->people->last_name ?? 'N/A',
+            ];
+        });
 
-        $callback = function () use ($samples) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, ['Sample code', 'Sub-project', 'Animal code', 'Field ID', 'Species', 'Sex', 'Age', 'Sample Type', 'Date Collected', 'Sampling site', 'Latitude', 'Longitude', 'Collector']);
-
-            foreach ($samples as $sample) {
-                fputcsv($file, [
-                    $sample->code,
-                    data_get($sample, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    $sample->animals->code,
-                    $sample->animals->field_label,
-                    $sample->animals->animal_species->name_common.' ('.$sample->animals->animal_species->name_scientific.')',
-                    $sample->animals->sex,
-                    $sample->animals->age,
-                    $sample->sample_types->name,
-                    $sample->date_collected,
-                    $sample->sampling_sites->name,
-                    $sample->latitude,
-                    $sample->longitude,
-                    $sample->people->title.' '.$sample->people->first_name.' '.$sample->people->last_name ?? 'N/A',
-                ]);
-            }
-
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable('animal_samples', $headers, $rows, $format);
     }
 
     public function render()

@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Concerns\ExportsTable;
 use App\Livewire\Concerns\WithColumnSorting;
 use App\Livewire\Forms\EnvironmentSamplesForm;
 use App\Models\EnvironmentSamples;
@@ -19,6 +20,7 @@ use Livewire\WithPagination;
 #[Title('Environment Samples Index')]
 class EnvironmentSamplesIndex extends PlainComponent
 {
+    use ExportsTable;
     use WithColumnSorting;
     use WithFileUploads;
     use WithPagination;
@@ -398,10 +400,8 @@ class EnvironmentSamplesIndex extends PlainComponent
         return $query;
     }
 
-    public function export()
+    public function export(string $format = 'csv')
     {
-        $fileName = 'environment_samples.csv';
-
         $query = EnvironmentSamples::with([
             'environment_sample_types',
             'sampling_sites',
@@ -436,38 +436,23 @@ class EnvironmentSamplesIndex extends PlainComponent
 
         $query = $this->applySorting($query, $this->sortMap(), ['created_at', 'desc']);
 
-        $samples = $query->get();
+        $headers = ['Sample code', 'Sub-project', 'Sample Type', 'Date Collected', 'Sampling site', 'Area', 'Latitude', 'Longitude', 'Collector'];
 
-        $headers = [
-            'Content-type' => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$fileName}",
-            'Pragma' => 'no-cache',
-            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
-            'Expires' => '0',
-        ];
+        $rows = $query->get()->map(function ($sample) {
+            return [
+                $sample->code,
+                data_get($sample, 'subProjectAssignment.subProject.code') ?? 'N/A',
+                $sample->environment_sample_types->name,
+                $sample->date_collected,
+                $sample->sampling_sites->name,
+                $sample->area,
+                $sample->latitude,
+                $sample->longitude,
+                $sample->people->first_name.' '.$sample->people->last_name ?? 'N/A',
+            ];
+        });
 
-        $callback = function () use ($samples) {
-            $file = fopen('php://output', 'w');
-            fputcsv($file, ['Sample code', 'Sub-project', 'Sample Type', 'Date Collected', 'Sampling site', 'Area', 'Latitude', 'Longitude', 'Collector']);
-
-            foreach ($samples as $sample) {
-                fputcsv($file, [
-                    $sample->code,
-                    data_get($sample, 'subProjectAssignment.subProject.code') ?? 'N/A',
-                    $sample->environment_sample_types->name,
-                    $sample->date_collected,
-                    $sample->sampling_sites->name,
-                    $sample->area,
-                    $sample->latitude,
-                    $sample->longitude,
-                    $sample->people->first_name.' '.$sample->people->last_name ?? 'N/A',
-                ]);
-            }
-
-            fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        return $this->exportTable('environment_samples', $headers, $rows, $format);
     }
 
     public function render()
