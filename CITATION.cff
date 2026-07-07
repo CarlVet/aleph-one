@@ -16,27 +16,12 @@ authors:
   - family-names: "van Schalkwyk"
     given-names: "Louis O."
     orcid: "https://orcid.org/0000-0003-4365-4904"
-  - family-names: Bastos
-    given-names: Armanda
-    orcid: "https://orcid.org/0000-0002-9223-4204"
-  - family-names: Oosthuizen
-    given-names: Marinda
-    orcid: "https://orcid.org/0000-0002-1893-0818"
-  - family-names: Quan
-    given-names: Melvyn
-    orcid: "https://orcid.org/0000-0003-3352-8488"
   - family-names: Bhoora
     given-names: "Raksha V."
     orcid: "https://orcid.org/0000-0003-2377-2735"
-  - family-names: Garofolo
-    given-names: Giuliano
-    orcid: "https://orcid.org/0000-0001-7017-3888"
   - family-names: "De Klerk"
     given-names: "Lin-Mari"
     orcid: "https://orcid.org/0000-0001-7348-3910"
-  - family-names: Minnie
-    given-names: Liaan
-    orcid: "https://orcid.org/0000-0002-9922-4295"
   - family-names: Biondetti
     given-names: "Giorgio P."
     orcid: "https://orcid.org/0000-0002-4640-2422"
@@ -46,7 +31,7 @@ authors:
 license: AGPL-3.0-only
 repository-code: "https://github.com/CarlVet/aleph-one"
 url: "https://aleph-one.com"
-version: 1.1.0
+version: 1.1.1
 date-released: "2026-07-07"
 identifiers:
   - type: doi
